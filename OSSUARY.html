@@ -1,0 +1,2707 @@
+<!doctype html>
+<!-- #!SRCD-MODULE 1
+     name: OSSUARY
+     slot: ossuary
+     processor: usr-ossuary
+     patch: get use
+     role: effect
+     contract: SRC-D r161 · runs standalone, as a face in an ØMNI_FRΛMΞ user rack, and as an insert on a STRΛTΛ track or its master
+     OSSUARY v2 (CORE) — one STFT (N=2048, hop 512, hann² WOLA, latency exactly N) carrying
+       GATE    stereo curve EQ · per-bin linear-phase gains, link/unlink, feeds the detectors
+       CRYPT   4-band compressor · 3 crossovers · a disabled band is 0 dB exactly
+       SHROUD  per-bin spectral compressor · params 1..8 wire-frozen since v1
+       VELVET  resonance tamer · per-bin dynamics, per-octave gain smoothing
+       EXHUME  two-pass recovery · a second dynamics pass on the removed stream: final = x·eq·[D+(1−D)·K2·restore]
+     Removal Audition System: FINAL / REMOVED / RECOVERED / PERMANENT / PREPARED, whole chain or per stage.
+     Loss ledger = removed energy per stage in dB re input. Detector levels: full-scale sine = 0 dB.
+     Params 0..10 wire-frozen; 11..57 append. Stereo insert: inputs[0] into outputs[0].
+     r2 · run modes: HOSTED asks the rack (wl-mount); a frame that no rack answers within 2.5 s runs STANDALONE; a rack that
+       speaks later gets the audio back; the address hash forces a mode: #standalone, #rack (fail closed, never a private
+       context), #sp (main-thread engine). Standalone engine: AudioWorklet (blob, then data: for file:// pages), else a
+       ScriptProcessor running the same processor class. Standalone inputs: test signals, an audio file (picker or drop),
+       the microphone. Meter: 256 log bands 20 Hz..20 kHz (mb[0..255], mb[256..511], mb[522..777]), four to each of the
+       64 display rows, the same on every sample rate; mb[521] counts frames that threw. Both stereo channels share one
+       complex FFT in each direction.
+     r3 · RENDER (standalone): the loaded file through this same worklet class, offline, in a worker (or on the page: #sp, or no worker), faster than real time
+       at the file's own rate; the engine's N-sample delay is removed so the output is the same length as the source and aligned with it; writes what PRINT
+       writes (32-bit float, before level), keeps the source's BWF bext and iXML. Nothing in the module span above changed.
+     r4-r10 · RENDER takes 2.1, quad, 4.1, 5.1 and 7.1 (channel masks name the layout; pairs and singles run as separate jobs with the same settings; dynamics are linked inside a pair, not between jobs). TAKES: the shared take store with KAIJU-BLUE (IndexedDB + BroadcastChannel, same origin); CLEAR empties it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: data:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>OSSUARY</title>
+<style>
+:root{--fg:#e9e4d6;--hi:#fff6dc;--dim:#8e8e96;--blood:#c2183b;--line:#26262e;--kb:52px;
+--puck:radial-gradient(circle at 7px 6px,#fffaf0 0,#e3d8bd 3.4px,#a99d83 5.3px,transparent 5.9px),radial-gradient(circle at 7px 16px,#fffaf0 0,#e3d8bd 3.4px,#a99d83 5.3px,transparent 5.9px),radial-gradient(circle at 31px 6px,#fffaf0 0,#e3d8bd 3.4px,#a99d83 5.3px,transparent 5.9px),radial-gradient(circle at 31px 16px,#fffaf0 0,#e3d8bd 3.4px,#a99d83 5.3px,transparent 5.9px),repeating-linear-gradient(90deg,rgba(58,50,32,.55) 0 1px,transparent 1px 3px) 13px 8px/12px 6px no-repeat,linear-gradient(#f2e9d0,#cdc1a2 55%,#9a8e75) 6px 6px/26px 10px no-repeat}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:#07070a;color:var(--fg);font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em;-webkit-user-select:none;user-select:none}
+.chassis{height:100vh;height:100dvh;width:min(100vw,max(56vh,360px));width:min(100vw,max(56dvh,360px));margin:0 auto;display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) auto;gap:6px;padding:6px 6px calc(6px + env(safe-area-inset-bottom));border-radius:8px;background:repeating-linear-gradient(90deg,rgba(255,255,255,.014) 0 1px,transparent 1px 3px),linear-gradient(#1b1b22,#0e0e12);box-shadow:inset 0 1px 0 #40404c,inset 0 0 0 1px #25252d}
+header{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:5px;border-bottom:1px solid #000;box-shadow:0 1px 0 #2b2b34;background:linear-gradient(#24242c,#16161b)}
+h1{margin:0;font-size:13px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;text-shadow:0 1px 0 #000,0 -1px 0 rgba(255,255,255,.14)}
+.sub{color:var(--dim);font-size:9px;letter-spacing:.16em;text-transform:uppercase}
+button.tog,#pwr,.skp,.pi{background:linear-gradient(#34343d,#1b1b21);color:var(--dim);border:1px solid #000;border-radius:3px;padding:4px 10px;font:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 0 #000;transition:color .12s,box-shadow .12s}
+button.tog:active,#pwr:active,.skp:active,.pi:active{transform:translateY(1px);box-shadow:inset 0 1px 3px #000}
+button.tog.on,#pwr.on,.skp.on,.pi.on{color:var(--hi);background:linear-gradient(#2a2a31,#17171c);box-shadow:inset 0 0 10px rgba(233,228,214,.28),0 0 8px rgba(233,228,214,.18),0 2px 0 #000}
+#pwr{margin-left:auto;padding:3px 9px}
+.scope{position:relative;height:clamp(76px,10.5vh,104px);height:clamp(76px,10.5dvh,104px);border:1px solid #000;border-radius:3px;background:#050508;box-shadow:inset 0 0 0 1px #2a2a33}
+#disp{width:100%;height:100%;display:block}
+.ruler{position:absolute;inset:0;pointer-events:none}
+.ruler span{position:absolute;left:0;right:0;border-top:1px solid rgba(233,228,214,.1);color:rgba(233,228,214,.5);font-size:8px;line-height:9px;padding-left:3px}
+.statrow{display:flex;gap:8px;align-items:center;min-height:16px}
+#stat{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:2px 6px;border:1px solid #000;border-radius:3px;background:#060608;box-shadow:inset 0 1px 4px #000;color:#cfc7b0;font-size:9px;text-transform:uppercase}
+#simtxt{color:var(--hi);font-size:9px;white-space:nowrap;text-transform:uppercase}
+.mon{display:grid;gap:6px}
+.mrow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.key{display:grid;gap:1px;padding:4px 2px!important;text-align:center;line-height:1.1;min-width:0}
+.key small{font-size:7px;letter-spacing:.16em;color:#6f6f78}
+.key b{font-size:10px;font-weight:600;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow2{display:grid;grid-template-columns:minmax(0,1fr) 108px;gap:8px;align-items:center}
+#lvlab{display:grid;grid-template-columns:34px minmax(60px,1fr) 58px;align-items:center;gap:6px;color:var(--dim);font-size:9px;text-transform:uppercase}
+.grm{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:4px;align-items:center;font-size:9px;text-transform:uppercase;color:var(--dim)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:26px;margin:0;background:transparent;cursor:grab;touch-action:pan-y}
+input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:repeating-linear-gradient(90deg,#55555f 0 1px,transparent 1px 10%) 0 100%/100% 3px no-repeat,linear-gradient(#020203,#14141a);box-shadow:inset 0 1px 3px #000,0 1px 0 #3a3a44}
+input[type=range]::-moz-range-track{height:8px;border-radius:4px;background:repeating-linear-gradient(90deg,#55555f 0 1px,transparent 1px 10%) 0 100%/100% 3px no-repeat,linear-gradient(#020203,#14141a);box-shadow:inset 0 1px 3px #000,0 1px 0 #3a3a44}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:38px;height:22px;margin-top:-7px;border:0;border-radius:0;background:var(--puck);filter:drop-shadow(0 2px 2px #000)}
+input[type=range]::-moz-range-thumb{width:38px;height:22px;border:0;border-radius:0;background:var(--puck);filter:drop-shadow(0 2px 2px #000)}
+input[type=range]:active::-webkit-slider-thumb{filter:drop-shadow(0 0 5px rgba(255,246,220,.55))}
+input[type=range]:active::-moz-range-thumb{filter:drop-shadow(0 0 5px rgba(255,246,220,.55))}
+output{text-align:right;color:var(--fg);font-size:10px;font-variant-numeric:tabular-nums}
+.pager{position:relative;min-height:0;overflow:hidden;touch-action:pan-y;border:1px solid #000;border-radius:5px;background:linear-gradient(#1d1d24,#131318);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 2px 0 #000}
+.track{display:flex;height:100%;transition:transform .26s cubic-bezier(.2,.8,.2,1);will-change:transform}
+.page{flex:0 0 100%;min-width:0;height:100%;padding:8px 10px;display:flex;flex-direction:column;gap:8px;overflow-x:hidden;overflow-y:auto;scrollbar-width:none}
+.page::-webkit-scrollbar{display:none}
+.page h2{margin:0;display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:600;letter-spacing:.24em;text-transform:uppercase;text-shadow:0 1px 0 #000}
+.page h2 em{font-style:normal;font-size:9px;letter-spacing:.1em;color:var(--dim)}
+#eqc{flex:1 1 0;min-height:120px;max-height:300px;width:100%;display:block;border:1px solid #000;border-radius:3px;background:#050508;box-shadow:inset 0 0 0 1px #2a2a33;cursor:crosshair;touch-action:none}
+.pg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;align-content:start}
+.pg>.tog,.pg>.fd,.pg>.sub,.pg>.krow,.pg>.bb{grid-column:1/-1}
+.pg>.tog{justify-self:start}
+.pg.tight{--kb:44px}
+.krow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.bb{display:grid;grid-template-columns:44px minmax(0,1fr) 64px;gap:8px;align-items:center;border-top:1px dashed var(--line);padding-top:6px}
+.bb .fd{grid-template-columns:minmax(0,1fr) 54px}
+.bb .fd span{display:none}
+.kn{--ks:var(--kb);width:100%;display:grid;justify-items:center;gap:1px;touch-action:none;cursor:ns-resize;outline:none}
+.kn svg{width:var(--ks);height:var(--ks);filter:drop-shadow(0 3px 3px #000)}
+.kn:focus-visible svg,.kn.grab svg{filter:drop-shadow(0 0 4px rgba(255,246,220,.6))}
+.kh{width:var(--ks);height:var(--ks)}
+.kn.big .kl{font-size:10px;color:var(--fg)}
+.kl{font-size:9px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase;text-align:center;white-space:nowrap}
+.kv{font-size:10px;color:var(--fg);text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fd{display:grid;grid-template-columns:78px minmax(0,1fr) 70px;align-items:center;gap:8px;color:var(--dim);font-size:10px;text-transform:uppercase}
+.dk,.eye{fill:#07070a}
+.eye{transition:fill .12s}
+.kn.grab .eye{fill:#fff6dc}
+#ledger{display:grid;gap:8px;padding:10px 12px;border:1px solid #000;border-radius:4px;background:linear-gradient(#101015,#0b0b0e);box-shadow:inset 0 2px 8px #000,0 1px 0 #2a2a33}
+.lr{display:grid;grid-template-columns:54px minmax(0,1fr) 58px;gap:8px;align-items:center;color:var(--dim);font-size:10px;text-transform:uppercase}
+.lr b,.grm b{font-weight:400;color:var(--fg);text-align:right;font-variant-numeric:tabular-nums}
+.lr b.hot,.grm b.hot{color:#d8294d}
+canvas.seg{width:100%;height:12px;display:block}
+.lf{font-size:10px;text-transform:uppercase;color:var(--dim)}
+.skg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.skp{display:grid;justify-items:center;gap:2px;padding:6px 2px;font-size:9px}
+.skth{display:block;width:54px;height:54px}
+.skth svg{width:54px;height:54px}
+#gen{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.note{font-size:9px;line-height:1.6;color:var(--dim);text-transform:uppercase}
+.dock{position:relative;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));height:56px;border:1px solid #000;border-radius:6px;background:linear-gradient(#24242c,#15151a);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 0 #000}
+.tab{position:relative;display:grid;justify-items:center;align-content:center;gap:2px;padding:0;background:none;border:0;color:var(--dim);font:inherit;font-size:7.5px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer}
+.tab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tab.on{color:var(--hi)}
+.tab .led{position:absolute;top:5px;left:calc(50% + 11px);margin:0}
+#ind{position:absolute;left:0;bottom:0;height:3px;width:calc(100% / 8);background:var(--fg);border-radius:2px 2px 0 0;box-shadow:0 0 8px rgba(233,228,214,.6);transition:transform .26s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.led{display:inline-block;width:7px;height:7px;border-radius:50%;background:#17171c;border:1px solid #000;box-shadow:inset 0 1px 1px #000,0 1px 0 #34343c}
+.led.on{background:radial-gradient(circle at 35% 30%,#fffaf0,#e9e4d6 55%,#b9ad92);box-shadow:0 0 7px rgba(233,228,214,.75)}
+.kn .arc{stroke:var(--fc,#e9e4d6);filter:drop-shadow(0 0 2.5px var(--fc,transparent))}
+.kn[data-fam=res] .arc{stroke:url(#gRes)}
+.fl{fill:var(--fc,#c2183b);fill-opacity:.55}
+.kn[data-fam=res] .fl{fill:url(#gRes);fill-opacity:.6}
+.drip{fill:none;stroke:var(--fc,#c2183b);stroke-width:1.4;stroke-linecap:round}
+.fd input[type=range]::-webkit-slider-runnable-track,.fd input[type=range]::-moz-range-track{background:linear-gradient(90deg,rgba(90,8,24,.9),rgba(194,24,59,.95) var(--v,0%),transparent var(--v,0%)),repeating-linear-gradient(90deg,#55555f 0 1px,transparent 1px 10%) 0 100%/100% 3px no-repeat,linear-gradient(#020203,#14141a)}
+.fd[data-fam=res] input[type=range]::-webkit-slider-runnable-track,.fd[data-fam=res] input[type=range]::-moz-range-track{background:linear-gradient(90deg,rgba(57,255,208,.85),rgba(138,107,255,.9) var(--v,0%),transparent var(--v,0%)),repeating-linear-gradient(90deg,#55555f 0 1px,transparent 1px 10%) 0 100%/100% 3px no-repeat,linear-gradient(#020203,#14141a)}
+#rcc,#hcc{flex:1 1 0;min-height:96px;max-height:200px;width:100%;display:block;border:1px solid #000;border-radius:3px;background:#050508;box-shadow:inset 0 0 0 1px #2a2a33;cursor:crosshair;touch-action:none}
+.kn.big{--ks:calc(var(--kb)*1.46)}
+/* auto-fit: a page that would overflow compacts itself, then scales; nothing is ever hidden behind a scroll */
+.page.c1{gap:6px;padding:6px 10px;--kb:46px}
+.page.c1 .pg{gap:4px}
+.page.c1 .pg.tight{--kb:40px}
+.page.c1 .sub{display:none}
+.page.c2{--kb:40px}
+.page.c2 .pg.tight{--kb:36px}
+.page.c2 .kl{font-size:8px}
+.page.c2 .fd input[type=range]{height:22px}
+.mrow3{display:grid;grid-template-columns:30px minmax(0,1fr) 30px 58px;gap:6px}
+.mrow3 .tog{padding:0}
+#pr-prev,#pr-next{display:grid;place-items:center}
+#pr-prev svg,#pr-next svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.plist{position:absolute;inset:0;z-index:20;display:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:8px;align-content:start;background:rgba(5,5,8,.95)}
+.plist.open{display:grid}
+.pi{display:grid;gap:2px;padding:6px 8px!important;text-align:left}
+.pi b{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--fg)}
+.pi small{font-size:8px;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.prt{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#takelist{display:grid;gap:4px;max-height:132px;overflow:auto;margin:4px 0}
+#takelist button{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#printtxt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--dim);text-transform:uppercase}
+/* explicit rows: hiding the header (rack chrome) must not shift the flexible pager row */
+.chassis>header{grid-row:1}.chassis>.scope{grid-row:2}.chassis>.statrow{grid-row:3}.chassis>.mon{grid-row:4}.chassis>.pager{grid-row:5}.chassis>.dock{grid-row:6}
+body.chromed header{display:none}
+
+/* ── standalone inputs · gate L/R edit · audit dimming · drop overlay · screen-reader text (added) ── */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+button,select{touch-action:manipulation}
+.trow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.trow[hidden]{display:none}
+.pg>.trow{grid-column:1/-1}
+button.tog[disabled]{opacity:.38;cursor:default;pointer-events:none}
+.key.dim{opacity:.5}
+#stat.err{color:#d8294d}
+#inp{display:grid;gap:6px}
+body:not(.solo) #inp{display:none}
+#inp .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sel{background:linear-gradient(#34343d,#1b1b21);color:var(--fg);border:1px solid #000;border-radius:3px;padding:4px 6px;font:inherit;font-size:10px;letter-spacing:.06em;min-width:0;max-width:100%;color-scheme:dark;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 0 #000}
+.xport{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:6px;align-items:center}
+.xport[hidden]{display:none}
+.xport .tog{padding:4px 8px}
+.xport output{min-width:66px;font-size:9px;color:var(--dim)}
+#srcnote{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.dropping .chassis::after{content:'drop an audio file';position:fixed;inset:6px;display:grid;place-items:center;border:2px dashed var(--fg);border-radius:6px;background:rgba(5,5,8,.88);color:var(--hi);font-size:13px;letter-spacing:.3em;text-transform:uppercase;z-index:60;pointer-events:none}
+</style>
+</head>
+<body>
+<svg id="defs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<radialGradient id="gBone" gradientUnits="userSpaceOnUse" cx="32" cy="25" r="27"><stop offset="0" stop-color="#fffaf0"/><stop offset=".45" stop-color="#e6dcc2"/><stop offset="1" stop-color="#a49878"/></radialGradient>
+<linearGradient id="gChrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a7a86"/><stop offset=".45" stop-color="#2b2b33"/><stop offset=".55" stop-color="#121217"/><stop offset="1" stop-color="#55555f"/></linearGradient>
+<radialGradient id="gWell" cx=".5" cy=".4" r=".7"><stop offset="0" stop-color="#1b1b22"/><stop offset="1" stop-color="#050507"/></radialGradient>
+<linearGradient id="gRes" gradientUnits="userSpaceOnUse" x1="4" y1="0" x2="60" y2="0"><stop offset="0" stop-color="#39ffd0"/><stop offset=".5" stop-color="#8a6bff"/><stop offset="1" stop-color="#ff6bd6"/></linearGradient>
+<clipPath id="gClip"><circle cx="32" cy="32" r="24.2"/></clipPath>
+</defs></svg>
+<template id="tpl-sk0"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M24.5 22C19 21 15 17.5 15.8 12.8C20.2 14.6 24.4 16.2 28.6 19ZM39.5 22 C45 21 49 17.5 48.2 12.8 C43.8 14.6 39.6 16.2 35.4 19 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M24.5 22 C19 21 15 17.5 15.8 12.8 C20.2 14.6 24.4 16.2 28.6 19 Z" fill="url(#gBone)"/><path d="M39.5 22 C45 21 49 17.5 48.2 12.8 C43.8 14.6 39.6 16.2 35.4 19 Z" fill="url(#gBone)"/><path d="M32 15.6C26 15.6 21.8 18.8 21 24C20.4 28.4 20.8 32.2 22.6 35.6L24.8 43.8L28.2 47.2L32 48ZM32 15.6 C38 15.6 42.2 18.8 43 24 C43.6 28.4 43.2 32.2 41.4 35.6 L39.2 43.8 L35.8 47.2 L32 48 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 15.6 C26 15.6 21.8 18.8 21 24 C20.4 28.4 20.8 32.2 22.6 35.6 L24.8 43.8 L28.2 47.2 L32.4 48 Z" fill="url(#gBone)"/><path d="M31.6 15.6 C38 15.6 42.2 18.8 43 24 C43.6 28.4 43.2 32.2 41.4 35.6 L39.2 43.8 L35.8 47.2 L31.6 48 Z" fill="url(#gBone)"/><path class="eye" d="M22.4 27.2 L30.6 30.6 L29.4 35 L23.6 33.4 Z"/><path class="eye" d="M41.6 27.2 L33.4 30.6 L34.6 35 L40.4 33.4 Z"/><path class="dk" d="M31.2 37.2 L30.5 41.4 L31.9 40.2 Z"/><path class="dk" d="M32.8 37.2 L33.5 41.4 L32.1 40.2 Z"/><path d="M24 43.2L32 44.6M40 43.2 L32 44.6 " fill="none" stroke="#3a3426" stroke-width=".9" stroke-linecap="round"/><path d="M25.6 43.6L28.4 44.2L27.4 49.6ZM38.4 43.6 L35.6 44.2 L36.6 49.6 Z" fill="#000" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/><path d="M25.6 43.6 L28.4 44.2 L27.4 49.6 Z" fill="#fffaf0"/><path d="M38.4 43.6 L35.6 44.2 L36.6 49.6 Z" fill="#fffaf0"/><path d="M30 20.4L32 24.2L34 20.4" fill="none" stroke="#6a6250" stroke-width=".9" stroke-linecap="round"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<template id="tpl-sk1"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M24 21.5C14.5 19.5 9.8 25.8 11.8 31.6C13.6 36.4 19.6 36.8 20.4 32.6C21 29.6 17.8 28.4 16.2 30.4M40 21.5 C49.5 19.5 54.2 25.8 52.2 31.6 C50.4 36.4 44.4 36.8 43.6 32.6 C43 29.6 46.2 28.4 47.8 30.4 " fill="none" stroke="#000" stroke-width="5.4" stroke-linecap="round"/><path d="M24 21.5C14.5 19.5 9.8 25.8 11.8 31.6C13.6 36.4 19.6 36.8 20.4 32.6C21 29.6 17.8 28.4 16.2 30.4M40 21.5 C49.5 19.5 54.2 25.8 52.2 31.6 C50.4 36.4 44.4 36.8 43.6 32.6 C43 29.6 46.2 28.4 47.8 30.4 " fill="none" stroke="url(#gBone)" stroke-width="3.5" stroke-linecap="round"/><path d="M24 21.5C14.5 19.5 9.8 25.8 11.8 31.6C13.6 36.4 19.6 36.8 20.4 32.6C21 29.6 17.8 28.4 16.2 30.4M40 21.5 C49.5 19.5 54.2 25.8 52.2 31.6 C50.4 36.4 44.4 36.8 43.6 32.6 C43 29.6 46.2 28.4 47.8 30.4 " fill="none" stroke="#5d5543" stroke-width="3.5" stroke-dasharray=".5 2.3"/><path d="M32 15.2C27.2 15.2 24.4 18.6 24.2 23.6C24 28.6 25.6 32.8 26 36L26.6 44.6Q26.8 47.4 29.2 47.4H32ZM32 15.2 C36.8 15.2 39.6 18.6 39.8 23.6 C40 28.6 38.4 32.8 38 36 L37.4 44.6 Q37.2 47.4 34.8 47.4 H32 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 15.2 C27.2 15.2 24.4 18.6 24.2 23.6 C24 28.6 25.6 32.8 26 36 L26.6 44.6 Q26.8 47.4 29.2 47.4 H32.4 Z" fill="url(#gBone)"/><path d="M31.6 15.2 C36.8 15.2 39.6 18.6 39.8 23.6 C40 28.6 38.4 32.8 38 36 L37.4 44.6 Q37.2 47.4 34.8 47.4 H31.6 Z" fill="url(#gBone)"/><path class="eye" d="M25.2 25.4 L30.2 27.4 L29.6 31.4 L26 30.4 Z"/><path class="eye" d="M38.8 25.4 L33.8 27.4 L34.4 31.4 L38 30.4 Z"/><ellipse class="dk" cx="30.2" cy="40.6" rx="1.1" ry="2.1"/><ellipse class="dk" cx="30.2" cy="40.6" rx="1.1" ry="2.1" transform="matrix(-1 0 0 1 64 0)"/><path d="M26.6 44.4H32M37.4 44.4 H32 " fill="none" stroke="#3a3426" stroke-width=".9" stroke-linecap="round"/><path d="M24.6 33L27.6 35.6M39.4 33 L36.4 35.6 " fill="none" stroke="#7a7058" stroke-width=".6" stroke-linecap="round"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<template id="tpl-sk2"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M23.2 22.4L18.2 14.6L27.6 19.2ZM40.8 22.4 L45.8 14.6 L36.4 19.2 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M23.2 22.4 L18.2 14.6 L27.6 19.2 Z" fill="url(#gBone)"/><path d="M40.8 22.4 L45.8 14.6 L36.4 19.2 Z" fill="url(#gBone)"/><path d="M32 16.6C25.4 16.6 20.8 20.6 20.8 26.6C20.8 31.2 22.2 34.4 23.6 36.6L23.2 46.8Q23.2 48.8 25.2 48.8H32ZM32 16.6 C38.6 16.6 43.2 20.6 43.2 26.6 C43.2 31.2 41.8 34.4 40.4 36.6 L40.8 46.8 Q40.8 48.8 38.8 48.8 H32 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 16.6 C25.4 16.6 20.8 20.6 20.8 26.6 C20.8 31.2 22.2 34.4 23.6 36.6 L23.2 46.8 Q23.2 48.8 25.2 48.8 H32.4 Z" fill="url(#gBone)"/><path d="M31.6 16.6 C38.6 16.6 43.2 20.6 43.2 26.6 C43.2 31.2 41.8 34.4 40.4 36.6 L40.8 46.8 Q40.8 48.8 38.8 48.8 H31.6 Z" fill="url(#gBone)"/><path class="dk" d="M24.2 40.6 H32.4 V47.6 H25.4 Q24.2 47.6 24.2 46.4 Z"/><path class="dk" d="M39.8 40.6 H31.6 V47.6 H38.6 Q39.8 47.6 39.8 46.4 Z"/><path d="M24.6 40.6L26.8 40.6L25.5 47.2ZM39.4 40.6 L37.2 40.6 L38.5 47.2 Z" fill="#000" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/><path d="M24.6 40.6 L26.8 40.6 L25.5 47.2 Z" fill="#fffaf0"/><path d="M39.4 40.6 L37.2 40.6 L38.5 47.2 Z" fill="#fffaf0"/><path d="M27.6 40.6L29.6 40.6L28.6 44.6ZM36.4 40.6 L34.4 40.6 L35.4 44.6 Z" fill="#000" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/><path d="M27.6 40.6 L29.6 40.6 L28.6 44.6 Z" fill="#fffaf0"/><path d="M36.4 40.6 L34.4 40.6 L35.4 44.6 Z" fill="#fffaf0"/><path d="M30.4 40.6H33.6L32 44.8Z" fill="#fffaf0"/><ellipse class="eye" cx="26.6" cy="29.8" rx="3.4" ry="3.2"/><ellipse class="eye" cx="26.6" cy="29.8" rx="3.4" ry="3.2" transform="matrix(-1 0 0 1 64 0)"/><path d="M22.4 25.4L30 27.6M41.6 25.4 L34 27.6 " fill="none" stroke="#3a3426" stroke-width=".9" stroke-linecap="round"/><path class="eye" d="M32 20.4L33.8 23.2L32 26L30.2 23.2Z" fill="none"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<template id="tpl-sk3"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M22.8 21L15.4 15.4L26.2 17.6ZM41.2 21 L48.6 15.4 L37.8 17.6 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M22.8 21 L15.4 15.4 L26.2 17.6 Z" fill="#d3c7a8"/><path d="M41.2 21 L48.6 15.4 L37.8 17.6 Z" fill="#d3c7a8"/><path d="M32 15.4L24.2 18.4L20.8 25.6L27 27.4L32 25ZM32 15.4 L39.8 18.4 L43.2 25.6 L37 27.4 L32 25 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 15.4 L24.2 18.4 L20.8 25.6 L27 27.4 L32.4 25 Z" fill="#f4ecd8"/><path d="M31.6 15.4 L39.8 18.4 L43.2 25.6 L37 27.4 L31.6 25 Z" fill="#f4ecd8"/><path d="M20.8 25.6L21.8 34L25.4 38.6L30 36L27 27.4ZM43.2 25.6 L42.2 34 L38.6 38.6 L34 36 L37 27.4 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M20.8 25.6 L21.8 34 L25.4 38.6 L30 36 L27 27.4 Z" fill="#d3c7a8"/><path d="M43.2 25.6 L42.2 34 L38.6 38.6 L34 36 L37 27.4 Z" fill="#d3c7a8"/><path d="M25.4 38.6L26.6 46L32 47.8L32 39.6L30 36ZM38.6 38.6 L37.4 46 L32 47.8 L32 39.6 L34 36 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M25.4 38.6 L26.6 46 L32.4 47.8 L32.4 39.6 L30 36 Z" fill="#a99d83"/><path d="M38.6 38.6 L37.4 46 L31.6 47.8 L31.6 39.6 L34 36 Z" fill="#a99d83"/><path d="M32.4 25 L27 27.4 L30 36 L32.4 39.6 Z" fill="#e6dcc2"/><path d="M31.6 25 L37 27.4 L34 36 L31.6 39.6 Z" fill="#e6dcc2"/><path class="eye" d="M22.6 27.4 L28.6 28.8 L28.2 33.6 L24.6 34.6 L22.4 31.2 Z"/><path class="eye" d="M41.4 27.4 L35.4 28.8 L35.8 33.6 L39.4 34.6 L41.6 31.2 Z"/><path class="dk" d="M32.4 36.6 L30.6 40.4 L32.4 39.6 Z"/><path class="dk" d="M31.6 36.6 L33.4 40.4 L31.6 39.6 Z"/><path d="M26.8 42.6h2.2v3.6h-2.2zM29.6 43.2h2.2v3.8h-2.2zM37.2 42.6 h-2.2 v3.6 h2.2 zM34.4 43.2 h-2.2 v3.8 h2.2 z" fill="#f4ecd8"/><path d="M32 15.4L30.4 19.8L31.8 22.8L30.6 25" fill="none" stroke="#4f4838" stroke-width=".7" stroke-linecap="round"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<template id="tpl-sk4"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M31 47L21 41L13.4 27.6L15 45.6L22 52L31 53.4ZM33 47 L43 41 L50.6 27.6 L49 45.6 L42 52 L33 53.4 Z" fill="#000" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/><path d="M31 47 L21 41 L13.4 27.6 L15 45.6 L22 52 L31 53.4 Z" fill="#6b6350"/><path d="M33 47 L43 41 L50.6 27.6 L49 45.6 L42 52 L33 53.4 Z" fill="#6b6350"/><path d="M22.6 24L16.2 13L27.4 19.2ZM41.4 24 L47.8 13 L36.6 19.2 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M22.6 24 L16.2 13 L27.4 19.2 Z" fill="url(#gBone)"/><path d="M41.4 24 L47.8 13 L36.6 19.2 Z" fill="url(#gBone)"/><path d="M32 15.2C26.2 15.2 22.4 18.6 21.8 24C21.3 28 22 32 24 35.4L26.4 44.6L32 49ZM32 15.2 C37.8 15.2 41.6 18.6 42.2 24 C42.7 28 42 32 40 35.4 L37.6 44.6 L32 49 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 15.2 C26.2 15.2 22.4 18.6 21.8 24 C21.3 28 22 32 24 35.4 L26.4 44.6 L32.4 49 Z" fill="url(#gBone)"/><path d="M31.6 15.2 C37.8 15.2 41.6 18.6 42.2 24 C42.7 28 42 32 40 35.4 L37.6 44.6 L31.6 49 Z" fill="url(#gBone)"/><path class="eye" d="M23.4 28.4 L30.4 30.4 L29.4 34.2 L24.4 32.8 Z"/><path class="eye" d="M40.6 28.4 L33.6 30.4 L34.6 34.2 L39.6 32.8 Z"/><path class="dk" d="M31.2 37.6 L30.6 40.8 L31.8 39.8 Z"/><path class="dk" d="M32.8 37.6 L33.4 40.8 L32.2 39.8 Z"/><path d="M25 43Q28.6 45.2 32 45M39 43 Q35.4 45.2 32 45 " fill="none" stroke="#3a3426" stroke-width=".9" stroke-linecap="round"/><path d="M26.6 42.8L28.8 43.2L27.7 51.4ZM37.4 42.8 L35.2 43.2 L36.3 51.4 Z" fill="#000" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/><path d="M26.6 42.8 L28.8 43.2 L27.7 51.4 Z" fill="#fffaf0"/><path d="M37.4 42.8 L35.2 43.2 L36.3 51.4 Z" fill="#fffaf0"/><path d="M26 17.4L32 22.4L38 17.4" fill="none" stroke="#6a6250" stroke-width="1" stroke-linecap="round"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<template id="tpl-sk5"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="url(#gChrome)" stroke="#000"/>
+<circle cx="32" cy="32" r="28.2" fill="none" stroke="#0b0b0f" stroke-width="3.2" pathLength="100" stroke-dasharray="75 25" transform="rotate(135 32 32)"/>
+<circle class="arc" cx="32" cy="32" r="28.2" fill="none" stroke="#e9e4d6" stroke-width="3.2" pathLength="100" stroke-dasharray="37.5 100" transform="rotate(135 32 32)"/>
+<circle cx="32" cy="32" r="24.6" fill="url(#gWell)" stroke="#000"/><g clip-path="url(#gClip)"><path class="fl" d=""/></g>
+<g class="sk" transform="rotate(0.0 32 33)"><path d="M23.8 21.2C19.4 18.6 16.4 15.4 17.5 11.5C20.2 13.8 23.6 15.6 27.4 17ZM40.2 21.2 C44.6 18.6 47.6 15.4 46.5 11.5 C43.8 13.8 40.4 15.6 36.6 17 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M23.8 21.2 C19.4 18.6 16.4 15.4 17.5 11.5 C20.2 13.8 23.6 15.6 27.4 17 Z" fill="url(#gBone)"/><path d="M40.2 21.2 C44.6 18.6 47.6 15.4 46.5 11.5 C43.8 13.8 40.4 15.6 36.6 17 Z" fill="url(#gBone)"/><path d="M29.8 19L32 8.2L34.2 19Z" fill="#000" stroke="#000" stroke-width="1.5" stroke-linejoin="round"/><path d="M29.8 19L32 8.2L34.2 19Z" fill="url(#gBone)"/><path d="M32 17C25.4 17 21 20.6 20.4 25.6C19.8 30 20.4 34 22.8 37L24.4 44.4L28 48L32 49ZM32 17 C38.6 17 43 20.6 43.6 25.6 C44.2 30 43.6 34 41.2 37 L39.6 44.4 L36 48 L32 49 Z" fill="#000" stroke="#000" stroke-width="1.7" stroke-linejoin="round"/><path d="M32.4 17 C25.4 17 21 20.6 20.4 25.6 C19.8 30 20.4 34 22.8 37 L24.4 44.4 L28 48 L32.4 49 Z" fill="url(#gBone)"/><path d="M31.6 17 C38.6 17 43 20.6 43.6 25.6 C44.2 30 43.6 34 41.2 37 L39.6 44.4 L36 48 L31.6 49 Z" fill="url(#gBone)"/><path d="M20.4 30L14.6 31.4L20.8 35ZM43.6 30 L49.4 31.4 L43.2 35 Z" fill="#000" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/><path d="M20.4 30 L14.6 31.4 L20.8 35 Z" fill="#d3c7a8"/><path d="M43.6 30 L49.4 31.4 L43.2 35 Z" fill="#d3c7a8"/><path d="M30 48.4L32 55.4L34 48.4Z" fill="#000" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/><path d="M30 48.4L32 55.4L34 48.4Z" fill="#cdbf9f"/><path class="eye" d="M22.6 29.4 L30.6 31.8 L29.6 34.2 L23.4 32.2 Z"/><path class="eye" d="M41.4 29.4 L33.4 31.8 L34.4 34.2 L40.6 32.2 Z"/><path d="M21.2 26.6L31 29.2M42.8 26.6 L33 29.2 " fill="none" stroke="#07070a" stroke-width="2.2" stroke-linecap="round"/><path class="dk" d="M31.2 37.4 L30.6 40.6 L31.8 39.6 Z"/><path class="dk" d="M32.8 37.4 L33.4 40.6 L32.2 39.6 Z"/><path d="M24 43H32V44L30.2 48L28.6 44.2L26.8 48.4L25 44.4ZM40 43 H32 V44 L33.8 48 L35.4 44.2 L37.2 48.4 L39 44.4 Z" fill="#000" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/><path d="M24 43 H32.4 V44 L30.2 48 L28.6 44.2 L26.8 48.4 L25 44.4 Z" fill="#fffaf0"/><path d="M40 43 H31.6 V44 L33.8 48 L35.4 44.2 L37.2 48.4 L39 44.4 Z" fill="#fffaf0"/></g>
+<g class="pt" transform="rotate(0.0 32 32)"><circle cx="32" cy="3.8" r="2.7" fill="#fff6dc" stroke="#000" stroke-width=".6"/></g></svg></template>
+<div class="chassis" id="face">
+<header><h1>OSSUARY</h1><span class="sub">Spectral Dynamics Chain</span><button id="pwr" aria-pressed="false"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px"><path d="M12 3.6v7.4"/><path d="M6.9 7.3a7.5 7.5 0 1 0 10.2 0"/></svg> POWER</button></header>
+<section class="scope"><canvas id="disp" width="560" height="128" aria-label="spectral display: input level in bone luminance, composite gain reduction in blood, low frequencies at the bottom"></canvas><div class="ruler" id="ruler"></div></section>
+<div class="statrow"><div id="stat">off</div><span id="simtxt"></span></div>
+<div id="live" class="sr" role="status" aria-live="polite"></div>
+<section class="mon">
+  <div class="mrow3">
+    <button class="tog" id="pr-prev" aria-label="previous preset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="tog key" id="pr-name"><small id="pr-sub">PRESET</small><b id="pr-title">INIT</b></button>
+    <button class="tog" id="pr-next" aria-label="next preset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+    <button class="tog key" id="bt-ab"><small>COMPARE</small><b id="v-ab">A</b></button>
+  </div>
+  <div class="mrow">
+    <button class="tog key" id="bt-byp"><small>DRY</small><b>BYPASS</b></button>
+    <button class="tog key" id="bt-gm"><small>MATCH</small><b id="v-gm">UNMATCHED</b></button>
+    <button class="tog key" id="bt-aud"><small>AUDITION</small><b id="v-aud">FINAL</b></button>
+    <button class="tog key" id="bt-adst"><small>AUDIT</small><b id="v-adst">CHAIN</b></button>
+    <button class="tog key" id="bt-ord"><small>ORDER</small><b id="v-ord">G&gt;C&gt;S&gt;V</b></button>
+  </div>
+  <div class="mrow2">
+    <span id="lvlab"><span>Level</span><input type="range" id="lvl" min="0" max="1" step="0.005" value="0.8" aria-label="output level"><output id="lvlo">-1.9 dB</output></span>
+    <div class="grm"><canvas class="seg" id="sg-gr"></canvas><b id="grv" class="hot">—</b></div>
+  </div>
+</section>
+<section class="pager" id="pager"><div class="plist" id="plist"></div><div class="track" id="track">
+  <article class="page" id="page-0"><h2>Gate<em>curve eq</em></h2><canvas id="eqc" width="560" height="160" aria-label="gate eq curve editor: drag nodes, tap empty space to add, double-tap a node to remove; crypt crossovers shown as dashed lines"></canvas><div class="pg" id="pg-gate"></div></article>
+  <article class="page" id="page-1"><h2>Crypt<em>4-band compressor</em></h2><div class="pg tight" id="pg-crypt"></div></article>
+  <article class="page" id="page-2"><h2>Shroud<em>spectral compressor</em></h2><div class="pg" id="pg-shroud"></div></article>
+  <article class="page" id="page-3"><h2>Velvet<em>resonance tamer</em></h2><div class="pg" id="pg-velvet"></div></article>
+  <article class="page" id="page-4"><h2>Exhume<em>focused restore · two-pass recovery</em></h2><canvas id="rcc" width="560" height="120" aria-label="resurrection targeting: blood is what was removed, the antidote colour is what returns; tap to aim a restore, drag to move it, double-tap to remove"></canvas><div class="sub">tap to aim a restore · drag to move · double-tap removes · resurrect adds the harmonics</div><div class="pg" id="pg-exh"></div></article>
+  <article class="page" id="page-5"><h2>Resurrect<em>harmonic restore · automatic</em></h2><canvas id="hcc" width="560" height="120" aria-label="resurrect: the spectrum, the fundamentals found inside your aims, and the harmonic comb being restored"></canvas><div class="sub" id="hcinfo">aim a focus on the exhume page · resurrect then finds its harmonics</div><div class="sub">tap a line: pin = always restore · again: veto = never · again: auto</div><div class="pg" id="pg-rsr"></div></article>
+  <article class="page" id="page-6"><h2>Loss<em>removed energy · db re input</em></h2>
+    <div id="ledger"><div class="lr"><span>gate</span><canvas class="seg" id="sg-0"></canvas><b id="ld-0">—</b></div><div class="lr"><span>crypt</span><canvas class="seg" id="sg-1"></canvas><b id="ld-1">—</b></div><div class="lr"><span>shroud</span><canvas class="seg" id="sg-2"></canvas><b id="ld-2">—</b></div><div class="lr"><span>velvet</span><canvas class="seg" id="sg-3"></canvas><b id="ld-3">—</b></div><div class="lr"><span>recov</span><canvas class="seg" id="sg-4"></canvas><b id="ld-4">—</b></div><div class="lr"><span>perm</span><canvas class="seg" id="sg-5"></canvas><b id="ld-5">—</b></div><div class="lr"><span>net</span><canvas class="seg" id="sg-6"></canvas><b id="ld-6" class="hot">—</b></div></div>
+    <div class="lf"><span id="ordtxt"></span></div>
+    <div class="note">bars are power against the input. recovered + permanent bars will not sum to removed: squared gains leave a cross term, and that energy is not lost. the waveforms do add.</div>
+    <div class="pg" id="pg-loss"></div>
+    <div class="prt"><button class="tog" id="bt-print">PRINT</button><button class="tog" id="bt-rend" disabled>RENDER</button><button class="tog" id="bt-takes" disabled>TAKES</button><button class="tog" id="bt-tkclear" hidden>CLEAR</button><span id="printtxt">idle</span></div><div id="takelist" hidden></div>
+    <div class="note" id="printnote">print records the audition stream as it leaves the engine, before level and the output ceiling, as a 32-bit float wav · bypass, match and the prepared split are part of it: print REMOVED, RECOVERED and PERMANENT with bypass off and they add as waveforms (recovered + permanent = removed) · render: the loaded file, offline, lined up with the source, metadata kept · mono to 7.1 · takes: shared with KAIJU-BLUE on the same address</div></article>
+  <article class="page" id="page-7"><h2>Sys<em>skull · signals · keys</em></h2>
+    <div class="sub">compare slots · <b id="ab-txt">A active · B empty</b></div><div class="ab"><button class="tog" id="ab-copy">copy active to the other slot</button></div>
+    <div class="sub">skull · <b id="skull-name">Horned</b></div><div class="skg" id="skp"></div>
+    <div id="inp">
+    <div class="sub">input · <b id="src-name">none</b></div>
+    <div id="gen"><span class="sub">Test signal</span><button class="tog" id="g0" aria-pressed="false">Tone</button><button class="tog" id="g1" aria-pressed="false">Noise</button><button class="tog" id="g2" aria-pressed="false">Sib</button><button class="tog" id="g3" aria-pressed="false">Series</button></div>
+    <div class="row"><button class="tog" id="bt-file">File…</button><button class="tog" id="bt-mic" aria-pressed="false">Mic</button><select class="sel" id="mic-dev" aria-label="microphone input" hidden></select><input type="file" id="file-in" accept="audio/*,video/*,.wav,.mp3,.flac,.ogg,.oga,.opus,.m4a,.aac,.aif,.aiff,.caf,.webm,.mp4" hidden aria-hidden="true" tabindex="-1"></div>
+    <div class="xport" id="xport" hidden><button class="tog" id="bt-play">Play</button><button class="tog" id="bt-loop" aria-pressed="false">Loop</button><input type="range" id="seek" min="0" max="1" step="0.001" value="0" aria-label="file position"><output id="tpos">0:00 / 0:00</output></div>
+    <div class="note" id="srcnote"></div>
+  </div>
+    <div class="note">series = 200 hz and its harmonics plus one stray 530 hz tone · aim exhume at 200 hz, raise target and resurrect: the stray tone should stay removed</div>
+    <div class="note">presets and compare slots hold the sound (stages, gate curve, aims); level, bypass, audition, match and split stay put · keys: [ ] preset · C compare · swipe the page or tap the dock · drag a skull up/down, shift = fine, double-tap resets · smoke = input level (-120..0 db) · blood = removed · antidote = restored · keys: B bypass · G match · M audition · N audit stage · O order · K skull</div>
+  </article>
+</div></section>
+<nav class="dock" id="dock" role="tablist"><button class="tab" id="tab-0" role="tab" aria-selected="false"><i class="led" id="led-gte"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16C7 16 7 7 12 7S17 16 21 16"/></svg><span>Gate</span></button><button class="tab" id="tab-1" role="tab" aria-selected="false"><i class="led" id="led-con"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19v-6M10 19V6M15 19v-9M20 19V4"/></svg><span>Crypt</span></button><button class="tab" id="tab-2" role="tab" aria-selected="false"><i class="led" id="led-son"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19c0-9 4-13 9-13s9 4 9 13z"/></svg><span>Shroud</span></button><button class="tab" id="tab-3" role="tab" aria-selected="false"><i class="led" id="led-von"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h6l2-13 2 9 2-9 2 13h6"/></svg><span>Velvet</span></button><button class="tab" id="tab-4" role="tab" aria-selected="false"><i class="led" id="led-eon"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v11M7 10l5-5 5 5M5 20h14"/></svg><span>Exhume</span></button><button class="tab" id="tab-5" role="tab" aria-selected="false"><i class="led" id="led-rsr"></i><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="8" rx="3.5" ry="4.5"/><path d="M12 12.5V21M7.5 16.5h9"/></svg><span>Resurrect</span></button><button class="tab" id="tab-6" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h7"/></svg><span>Loss</span></button><button class="tab" id="tab-7" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg><span>Sys</span></button><i id="ind"></i></nav>
+</div>
+<script>
+"use strict";
+/* ═══════════ SRC-D SHΛRΞD HΞΛDΞR · as the suite's faces carry it ═══════════ */
+const SRCD_HOSTED=!!(window.parent&&window.parent!==window);
+const SRCD_RATES={prefer:48000, min:44100, max:96000};
+/* ═ r136 origin pinning ═ srcdAdmit / srcdUp */
+let SRCD_PO=null, SRCD_PWARN=false;
+const SRCD_WEB=o=>typeof o==='string' && /^https?:/i.test(o);
+if(typeof SRCD_HOSTED!=='undefined' && SRCD_HOSTED){ try{ const ao=location.ancestorOrigins; if(ao&&ao.length&&SRCD_WEB(ao[0])) SRCD_PO=ao[0]; }catch(_){} }
+function srcdAdmit(e){
+  if(typeof SRCD_HOSTED==='undefined' || !SRCD_HOSTED || !e || e.source!==window.parent) return false;
+  if(SRCD_PO) return e.origin===SRCD_PO;
+  if(SRCD_WEB(e.origin)) SRCD_PO=e.origin;
+  return true;
+}
+function srcdUp(msg, transfer){
+  if(typeof SRCD_HOSTED==='undefined' || !SRCD_HOSTED) return;
+  if(!SRCD_PO && !SRCD_PWARN){ SRCD_PWARN=true; try{ console.warn('srcd: parent origin unknown, using "*" until rack speaks'); }catch(_){} }
+  try{ window.parent.postMessage(msg, SRCD_PO||'*', transfer||[]); }catch(_){}
+}
+window.__srcdUp=srcdUp; window.__srcdAdmit=srcdAdmit;
+/* every 'message' listener, now and later, hears only the rack that mounted us */
+(function srcdOnlyOurParent(){
+  const real = window.addEventListener.bind(window), realRm = window.removeEventListener.bind(window), WRAP = new Map();
+  window.addEventListener = function(type, fn, opts){
+    if (type !== 'message' || typeof fn !== 'function') return real(type, fn, opts);
+    const w = function(e){
+      if (window.parent === window) return;      /* standalone: nobody to trust */
+      if (!srcdAdmit(e)) return;    /* not our chassis */
+      return fn.call(this, e);
+    };
+    WRAP.set(fn, w);
+    return real(type, w, opts);
+  };
+  window.removeEventListener = function(type, fn, opts){
+    if (type === 'message' && WRAP.has(fn)){ const w = WRAP.get(fn); WRAP.delete(fn); return realRm(type, w, opts); }
+    return realRm(type, fn, opts);
+  };
+})();
+/* ═══════════ THΞ MØDULΞ ═══════════ from MOD_ID to the end of WORKLET_SRC: constants only
+   (the console's probe evaluates exactly this span, with no document and no window) */
+const MOD_ID="ossuary";
+const SRCD_MOD="ossuary";
+const STAGES=["GATE","CRYPT","SHROUD","VELVET"];
+const PERMS=[0,1,2,3, 0,1,3,2, 0,2,1,3, 0,2,3,1, 0,3,1,2, 0,3,2,1,
+            1,0,2,3, 1,0,3,2, 1,2,0,3, 1,2,3,0, 1,3,0,2, 1,3,2,0,
+            2,0,1,3, 2,0,3,1, 2,1,0,3, 2,1,3,0, 2,3,0,1, 2,3,1,0,
+            3,0,1,2, 3,0,2,1, 3,1,0,2, 3,1,2,0, 3,2,0,1, 3,2,1,0];
+const P=[
+ {k:"lvl", n:"LEVEL",      min:0, max:1, d:0.8},
+ {k:"thr", n:"THRESHOLD",  min:0, max:1, d:0.5},
+ {k:"rat", n:"RATIO",      min:0, max:1, d:0.12},
+ {k:"atk", n:"ATTACK",     min:0, max:1, d:0.4},
+ {k:"rel", n:"RELEASE",    min:0, max:1, d:0.55},
+ {k:"mgr", n:"MAX GR",     min:0, max:1, d:0.5},
+ {k:"tlt", n:"TILT",       min:0, max:1, d:0.5},
+ {k:"smt", n:"SMOOTH",     min:0, max:1, d:0.25},
+ {k:"mix", n:"MIX",        min:0, max:1, d:1},
+ {k:"byp", n:"BYPASS",     min:0, max:1, d:0},
+ {k:"gh",  n:"GHOST",      min:0, max:1, d:0},
+ {k:"gte", n:"GATE ON",    min:0, max:1, d:0},
+ {k:"glk", n:"GATE LINK",  min:0, max:1, d:1},
+ {k:"con", n:"CRYPT ON",   min:0, max:1, d:0},
+ {k:"cx1", n:"XOVER 1",    min:0, max:1, d:0.54},
+ {k:"cx2", n:"XOVER 2",    min:0, max:1, d:0.61},
+ {k:"cx3", n:"XOVER 3",    min:0, max:1, d:0.62},
+ {k:"ce0", n:"B1 ON",      min:0, max:1, d:1},
+ {k:"ce1", n:"B2 ON",      min:0, max:1, d:1},
+ {k:"ce2", n:"B3 ON",      min:0, max:1, d:1},
+ {k:"ce3", n:"B4 ON",      min:0, max:1, d:1},
+ {k:"ct0", n:"B1 THRESH",  min:0, max:1, d:0.5},
+ {k:"ct1", n:"B2 THRESH",  min:0, max:1, d:0.5},
+ {k:"ct2", n:"B3 THRESH",  min:0, max:1, d:0.5},
+ {k:"ct3", n:"B4 THRESH",  min:0, max:1, d:0.5},
+ {k:"cr0", n:"B1 RATIO",   min:0, max:1, d:0.15},
+ {k:"cr1", n:"B2 RATIO",   min:0, max:1, d:0.15},
+ {k:"cr2", n:"B3 RATIO",   min:0, max:1, d:0.15},
+ {k:"cr3", n:"B4 RATIO",   min:0, max:1, d:0.15},
+ {k:"cat", n:"CRYPT ATK",  min:0, max:1, d:0.4},
+ {k:"crl", n:"CRYPT REL",  min:0, max:1, d:0.55},
+ {k:"von", n:"VELVET ON",  min:0, max:1, d:0},
+ {k:"vth", n:"VEL THRESH", min:0, max:1, d:0.4},
+ {k:"vrt", n:"VEL RATIO",  min:0, max:1, d:0.5},
+ {k:"vdp", n:"VEL DEPTH",  min:0, max:1, d:0.6},
+ {k:"vsg", n:"VEL OCT SG", min:0, max:1, d:0.25},
+ {k:"vak", n:"VEL ATK",    min:0, max:1, d:0.35},
+ {k:"vrl", n:"VEL REL",    min:0, max:1, d:0.7},
+ {k:"eon", n:"EXHUME ON",  min:0, max:1, d:0},
+ {k:"eth", n:"EXH THRESH", min:0, max:1, d:0.45},
+ {k:"ert", n:"EXH RATIO",  min:0, max:1, d:0.5},
+ {k:"esk", n:"EXH OCT SG", min:0, max:1, d:0.25},
+ {k:"edx", n:"EXH DEPTH",  min:0, max:1, d:0.5},
+ {k:"eat", n:"EXH ATK",    min:0, max:1, d:0.4},
+ {k:"erl", n:"EXH REL",    min:0, max:1, d:0.6},
+ {k:"erm", n:"RESTORE",    min:0, max:1, d:1},
+ {k:"ord", n:"ORDER",      min:0, max:1, d:0},
+ {k:"aud", n:"AUDITION",   min:0, max:1, d:0},
+ {k:"adst",n:"AUDIT",      min:0, max:1, d:0},
+ {k:"son", n:"SHROUD ON",  min:0, max:1, d:1},
+ {k:"gmt", n:"MATCH",      min:0, max:1, d:0},
+ {k:"psp", n:"PREP SPLIT", min:0, max:1, d:0},
+ {k:"etg", n:"TARGET",     min:0, max:1, d:0},
+ {k:"ehm", n:"RESURRECT", min:0, max:1, d:0},
+ {k:"etw", n:"TGT WIDTH",  min:0, max:1, d:0.35},
+ {k:"ehn", n:"ORDERS",     min:0, max:1, d:0.4},
+ {k:"ehd", n:"ROLL-OFF",   min:0, max:1, d:0.6},
+ {k:"eht", n:"TRACK",      min:0, max:1, d:0.4}
+];
+const NP=58;
+const PROC="usr-ossuary";
+const GATE0=[];
+const WORKLET_SRC=`const NP=${NP};
+const PDEF=${JSON.stringify(P.map(q=>({a:q.min,b:q.max})))};
+const PD0=${JSON.stringify(P.map(q=>q.d))};
+const G0=${JSON.stringify(GATE0)};
+const PROC=${JSON.stringify(PROC)};
+const PERMS=${JSON.stringify(PERMS)};
+/* OSSUARY v2 worklet: one STFT, layered per-bin gains. N=2048, hop 512, hann analysis and synthesis
+   windows (COLA 2/3), latency exactly N. Slots: 0 GATE, 1 CRYPT, 2 SHROUD, 3 VELVET; the order param
+   picks one of 24 permutations (lexicographic) and a working dB spectrum walks the chain, so each
+   dynamic stage hears the signal as shaped by the stages before it. Detector dB: full-scale sine = 0.
+   Audition: 0 FINAL, 1 REMOVED, 2 RECOVERED, 3 PERMANENT, 4 PREPARED; audit target 0 chain, 1..4 stage.
+   EXHUME: final = x*eq*[D+(1-D)*K2*restore], so removed = D-complement and recovered + permanent = removed. */
+const N=2048, H=512, NB=1024, NL=1025, KNEE=6, K2=3, RB=3, COLA=2/3, MIND=1e-24, MINDB=-160;
+const DBN=20*Math.log10(N/4), CT=0.977, CR=1-CT;
+function ceil1(x){
+  if(x!==x) return 0;
+  if(x<1e-15&&x>-1e-15) return 0;
+  if(x>CT) return CT+CR*Math.tanh((x-CT)/CR);
+  if(x<-CT) return -(CT+CR*Math.tanh((-x-CT)/CR));
+  return x;
+}
+function knee(o, ir){
+  if(o<=-K2) return 0;
+  if(o<K2){ const u=(o+K2)/KNEE; return (ir-1)*K2*u*u; }
+  return (ir-1)*o;
+}
+function lvl(s, e){
+  if(e<1e-18||!(s>0)) return MINDB;
+  const v=10*Math.log10(s/e);
+  return v<MINDB?MINDB:v;
+}
+class OssuaryFX extends AudioWorkletProcessor{
+  constructor(){
+    super();
+    const S=2*Math.PI/N, F=n=>new Float32Array(n), D=n=>new Float64Array(n);
+    this.w=F(N); for(let i=0;i<N;i++) this.w[i]=0.5-0.5*Math.cos(S*i);
+    this.tc=F(NB); this.ts=F(NB); for(let k=0;k<NB;k++){ this.tc[k]=Math.cos(S*k); this.ts[k]=Math.sin(S*k); }
+    this.rev=new Uint32Array(N);
+    for(let i=0;i<N;i++){ let r=0, x=i; for(let b=0;b<11;b++){ r=(r<<1)|(x&1); x>>=1; } this.rev[i]=r; }
+    this.perm=Uint8Array.from(PERMS);
+    this.hist=[F(N),F(N)]; this.dl=[F(N),F(N)]; this.acc=[F(N),F(N)];
+    this.re=[F(N),F(N)]; this.im=[F(N),F(N)];
+    this.rr=[F(NL),F(NL)]; this.ri=[F(NL),F(NL)]; this.ar=[F(NL),F(NL)]; this.ai=[F(NL),F(NL)];
+    this.rdb=[D(NL),D(NL)]; this.wd=[D(NL),D(NL)];
+    this.eqp=[D(64),D(64)]; this.eqn=[0,0]; this.eqg=[F(NL).fill(1),F(NL).fill(1)]; this.eqd=[D(NL),D(NL)]; this.eqa=[0,0];
+    this.envC=D(4).fill(-160); this.cdb=D(NL); this.clin=D(NL).fill(1); this.bE=new Int32Array(5); this.eA=D(3); this.eB=D(3);
+    this.envS=D(NL).fill(-160); this.gRaw=D(NL); this.gSm=D(NL); this.gT=D(NL).fill(1);
+    this.envV=D(NL).fill(-160); this.vRaw=D(NL); this.vSm=D(NL); this.vel=D(NL).fill(1);
+    this.envE=D(NL).fill(-160); this.eRaw=D(NL); this.eSm=D(NL); this.ex=D(NL).fill(1);
+    this.pad=D(NL+1024); this.p0=D(NL+1025); this.p1=D(NL+1025);
+    this.dyn=D(NL).fill(1); this.rem=D(NL); this.kern=D(49); this.kR=0; this.led=D(8);
+    this.pos=new Int32Array(4); this.hv=0; this.hs=-1;
+    this.mb=new Float32Array(1259); this.mm=['m', this.mb]; this.ml=new Int32Array(256); this.mh=new Int32Array(256); this.mw=new Float64Array(256); this.fe=0;
+    this.tgp=D(16); this.tgn=0; this.tw=D(NL); this.rcv=D(NL); this.hw=D(NL); this.hl=D(480); this.hn=0; this.f0=D(8); this.tga=D(8); this.tps=new Int32Array(8); this.tvs=new Int32Array(8); this.cb=new Int32Array(3); this.cv=D(3); this.qb=0;
+    this.rb=new Float32Array(1024); this.rm=['r', this.rb]; this.rec=0; this.rn=0;
+    this.ed=0; this.ew=0; this.mg=1;
+    this.p=new Float64Array(NP); for(let i=0;i<NP;i++) this.p[i]=PD0[i];
+    this.hp=0; this.wi=0; this.ep=0; this.tot=0; this.quiet=0; this.oq=0; this.asleep=true;
+    this.byp=this.p[9]>0.5; this.xw=this.byp?1:0; this.lastT=0;
+    this.setKern(); this.setBands(); this.setTw(); this.setMeterMap();
+    this.port.onmessage=e=>this.msg(e.data);
+  }
+  setKern(){
+    const sg=8*this.p[7];
+    if(sg<0.05){ this.kR=0; this.kern[0]=1; return; }
+    let r=Math.ceil(sg*3); if(r>24) r=24;
+    let s=0;
+    for(let j=-r;j<=r;j++){ const v=Math.exp(-(j*j)/(2*sg*sg)); this.kern[j+r]=v; s+=v; }
+    for(let j=0;j<=2*r;j++) this.kern[j]/=s;
+    this.kR=r;
+  }
+  setBands(){
+    const bh=sampleRate/N;
+    let a=40*Math.pow(20,this.p[14]), b=200*Math.pow(16,this.p[15]), c=800*Math.pow(15,this.p[16]), t;
+    if(b<a){ t=a; a=b; b=t; }
+    if(c<b){ t=b; b=c; c=t; }
+    if(b<a){ t=a; a=b; b=t; }
+    let e1=Math.round(a/bh), e2=Math.round(b/bh), e3=Math.round(c/bh);
+    if(e1<1) e1=1; if(e1>NL-3) e1=NL-3;
+    if(e2<e1+1) e2=e1+1; if(e2>NL-2) e2=NL-2;
+    if(e3<e2+1) e3=e2+1; if(e3>NL-1) e3=NL-1;
+    this.bE[0]=0; this.bE[1]=e1; this.bE[2]=e2; this.bE[3]=e3; this.bE[4]=NL;
+  }
+  setEq(ch){
+    const bh=sampleRate/N, pts=this.eqp[ch], n=this.eqn[ch], g=this.eqg[ch], db=this.eqd[ch];
+    let act=0, pi=0;
+    for(let b=0;b<NL;b++){
+      const f=b*bh;
+      while(pi<n-1 && pts[(pi+1)*2]<=f) pi++;
+      let v;
+      if(n===0) v=0;
+      else if(f<=pts[0]) v=pts[1];
+      else if(f>=pts[(n-1)*2]) v=pts[(n-1)*2+1];
+      else{
+        const f0=pts[pi*2], g0=pts[pi*2+1], f1=pts[pi*2+2], g1=pts[pi*2+3];
+        v=g0+(g1-g0)*(Math.log2(f)-Math.log2(f0))/(Math.log2(f1)-Math.log2(f0));
+      }
+      db[b]=v; g[b]=Math.pow(10,v/20);
+      const a=v<0?-v:v; if(a>act) act=a;
+    }
+    this.eqa[ch]=act;
+    if(ch===0 && this.p[12]>0.5){
+      this.eqn[1]=n; this.eqp[1].set(pts); this.eqg[1].set(g); this.eqd[1].set(db); this.eqa[1]=act;
+    }
+  }
+  /* meter bands: 256 log-spaced bands over 20 Hz..20 kHz, the display's own axis. A band wider than one FFT bin takes the loudest bin whose
+     centre falls inside it. A band narrower than a bin (the low end, under ~850 Hz) reads a parabola through the three nearest bins in
+     magnitude, which places a low peak to about 1 Hz where plain bins would blur it by half a bin (~12 Hz): 20..100 Hz is a curve, not
+     a few flat blocks. Same 1259-float message as before: only what a band means has changed. */
+  setMeterMap(){
+    const bh=sampleRate/N, ml=this.ml, mh=this.mh, mw=this.mw;
+    for(let j=0;j<256;j++){
+      const p0=20*Math.pow(1000,j/256)/bh, p1=20*Math.pow(1000,(j+1)/256)/bh;
+      let lo=Math.ceil(p0), hi=Math.ceil(p1)-1;
+      if(hi>=lo){ if(hi>NB-1) hi=NB-1; if(lo>hi) lo=hi; ml[j]=lo; mh[j]=hi; mw[j]=0; }
+      else{ const pc=0.5*(p0+p1); let b=Math.round(pc); if(b<1) b=1; if(b>NB-1) b=NB-1; ml[j]=b; mh[j]=-1; mw[j]=pc-b; }
+    }
+  }
+  /* exhume focus: per-bin restore weight, a bell (octaves) around each aimed target */
+  setTw(){
+    const bh=sampleRate/N, n=this.tgn, sg=(0.15+1.35*this.p[54])/2.355, tw=this.tw, tp=this.tgp;
+    for(let b=0;b<NL;b++){
+      const f=b===0?bh*0.5:b*bh;
+      let m=0;
+      for(let i=0;i<n;i++){ const z=Math.log2(f/tp[i*2])/sg, v=tp[i*2+1]*Math.exp(-0.5*z*z); if(v>m) m=v; }
+      tw[b]=m>1?1:m;
+    }
+  }
+  /* strongest input level within a tolerance (fraction of x) around x Hz; leaves its bin in this.qb */
+  pkn(x, tol){
+    const bh=sampleRate/N, c=Math.round(x/bh), r0=this.rdb[0], r1=this.rdb[1];
+    let t=Math.round(tol*c); if(t<1) t=1;
+    let lo=c-t, hi=c+t; if(lo<1) lo=1; if(hi>NB-1) hi=NB-1;
+    let qv=-1e9, qb=-1;
+    for(let b=lo;b<=hi;b++){ const v=r0[b]>r1[b]?r0[b]:r1[b]; if(v>qv){ qv=v; qb=b; } }
+    /* a maximum on the edge of the window with a higher neighbour outside it is the skirt of another peak, not a peak here */
+    if(qb===lo||qb===hi){
+      const nb=qb===lo?qb-1:qb+1;
+      if(nb>=1&&nb<=NB-1){ const nv=r0[nb]>r1[nb]?r0[nb]:r1[nb]; if(nv>qv){ this.qb=-1; return -1e9; } }
+    }
+    this.qb=qb;
+    return qv;
+  }
+  /* salience 0..1 of the spectrum at x Hz against the strongest peak of the aim (45 dB window) */
+  sal(x, ref, tol){
+    const s=(this.pkn(x,tol)-(ref-45))/45;
+    return s<0?0:(s>1?1:s);
+  }
+  /* parabolic peak position offset (bins) from the dB values around bin b */
+  pfr(b){
+    if(b<2||b>NB-2) return 0;
+    const r0=this.rdb[0], r1=this.rdb[1];
+    const am=r0[b-1]>r1[b-1]?r0[b-1]:r1[b-1], pv=r0[b]>r1[b]?r0[b]:r1[b], ap=r0[b+1]>r1[b+1]?r0[b+1]:r1[b+1], den=am-2*pv+ap;
+    if(den>-1e-9) return 0;
+    const d=0.5*(am-ap)/den;
+    return d>0.5?0.5:(d<-0.5?-0.5:d);
+  }
+  msg(m){
+    if(!m||!m.length) return;
+    const c=m[0];
+    if(c==='p'){
+      const i=m[1]|0, v=+m[2];
+      if(i>=0&&i<NP&&v===v){ const d=PDEF[i]; this.p[i]=v<d.a?d.a:(v>d.b?d.b:v); }
+      if(i===7) this.setKern();
+      if(i===12&&this.p[12]>0.5) this.setEq(0);
+      if(i===14||i===15||i===16) this.setBands();
+      if(i===54) this.setTw();
+      if(i===9){ const b=this.p[9]>0.5; if(b!==this.byp){ this.byp=b; this.quiet=0; } }
+      return;
+    }
+    if(c==='eq'){
+      const ch=m[1]&1, n=Math.min(32,m[2]|0), pts=this.eqp[ch];
+      let last=0, cnt=0;
+      for(let i=0;i<n;i++){
+        let f=+m[3+i*2], g=+m[4+i*2];
+        if(f!==f||g!==g) continue;
+        if(f<20) f=20; if(f>20000) f=20000;
+        if(g<-18) g=-18; if(g>18) g=18;
+        if(f<last) f=last;
+        pts[cnt*2]=f; pts[cnt*2+1]=g; last=f; cnt++;
+      }
+      this.eqn[ch]=cnt; this.setEq(ch);
+      return;
+    }
+    if(c==='panic'){
+      this.envS.fill(-160); this.envV.fill(-160); this.envE.fill(-160); this.envC.fill(-160);
+      this.gT.fill(1); this.vel.fill(1); this.ex.fill(1); this.quiet=0;
+      return;
+    }
+    if(c==='tg'){
+      const n=Math.min(8,m[1]|0);
+      let cnt=0;
+      for(let i=0;i<n;i++){
+        let f=+m[2+i*4], w=+m[3+i*4], pm=m[4+i*4]|0, vm=m[5+i*4]|0;
+        if(f!==f||w!==w) continue;
+        if(f<20) f=20; if(f>20000) f=20000;
+        if(w<0) w=0; if(w>1) w=1;
+        pm&=4095; vm&=4095; vm&=~pm;
+        this.tgp[cnt*2]=f; this.tgp[cnt*2+1]=w; this.tps[cnt]=pm; this.tvs[cnt]=vm;
+        if(this.tga[cnt]<=0||Math.abs(Math.log2(f/this.tga[cnt]))>0.04) this.f0[cnt]=f;
+        this.tga[cnt]=f; cnt++;
+      }
+      this.tgn=cnt; this.setTw();
+      return;
+    }
+    if(c==='print'){
+      if(+m[1]>0){ this.rn=0; this.rec=1; }
+      else if(this.rec){
+        this.rec=0;
+        if(this.rn>0){ this.port.postMessage(['r', this.rb.slice(0,this.rn)]); this.rn=0; }
+        this.port.postMessage(['rend']);
+      }
+      return;
+    }
+    /* on, off, play, region, region-end: an insert has no voices and no pattern; tolerated, ignored */
+  }
+  fft(re, im, dir){
+    const rv=this.rev, tc=this.tc, ts=this.ts;
+    let t;
+    for(let i=0;i<N;i++){ const j=rv[i]; if(j>i){ t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; } }
+    for(let len=2;len<=N;len<<=1){
+      const hf=len>>1, st=N/len;
+      for(let i=0;i<N;i+=len){
+        let tw=0;
+        for(let k=0;k<hf;k++){
+          const c=tc[tw], s=dir>0?-ts[tw]:ts[tw], a=i+k, b=a+hf;
+          const tr=re[b]*c-im[b]*s, ti=re[b]*s+im[b]*c;
+          re[b]=re[a]-tr; im[b]=im[a]-ti; re[a]+=tr; im[a]+=ti;
+          tw+=st;
+        }
+      }
+    }
+    if(dir<0){ const v=1/N; for(let i=0;i<N;i++){ re[i]*=v; im[i]*=v; } }
+  }
+  /* triangular smoothing, W octaves wide both below and above: the radius is b*(1-2^-W) bins down and b*(2^W-1) bins up,
+     with no cap. Weights are summed in O(1) per bin from prefix sums of s and x*s over an edge-replicated copy. */
+  osm(src, dst, W){
+    const kh=Math.pow(2,W)-1, kl=1-Math.pow(2,-W), P0=this.p0, P1=this.p1, PD=this.pad, O=512, T=NL+2*O;
+    for(let i=0;i<T;i++){ const x=i-O; PD[i]=src[x<0?0:(x>=NL?NL-1:x)]; }
+    P0[0]=0; P1[0]=0;
+    for(let i=0;i<T;i++){ P0[i+1]=P0[i]+PD[i]; P1[i+1]=P1[i]+i*PD[i]; }
+    for(let b=0;b<NL;b++){
+      const rl=Math.round(b*kl), rh=Math.round(b*kh);
+      if(rl+rh===0){ dst[b]=src[b]; continue; }
+      const c=b+O, s0L=P0[c+1]-P0[c-rl], s1L=P1[c+1]-P1[c-rl];
+      let acc=s0L-(c*s0L-s1L)/(rl+1);
+      if(rh>0){ const s0R=P0[c+rh+1]-P0[c+1], s1R=P1[c+rh+1]-P1[c+1]; acc+=s0R-(s1R-c*s0R)/(rh+1); }
+      dst[b]=acc/((rl+rh)*0.5+1);
+    }
+  }
+  /* energy that gain array g removes from the spectrum as it stands now: sum of power*(1-g)^2 */
+  ered(g){
+    const re=this.re, im=this.im;
+    let s=0;
+    for(let c=0;c<2;c++){
+      const r=re[c], m=im[c];
+      for(let b=0;b<NL;b++){ const x=1-g[b]; s+=(r[b]*r[b]+m[b]*m[b])*x*x; }
+    }
+    return s;
+  }
+  cap(){
+    for(let c=0;c<2;c++){
+      const r=this.re[c], m=this.im[c], a=this.ar[c], d=this.ai[c];
+      for(let b=0;b<NL;b++){ a[b]=r[b]; d[b]=m[b]; }
+    }
+  }
+  /* apply a gain array to both channels, the working dB spectrum and the composite */
+  apply(g, db){
+    const re=this.re, im=this.im, wd=this.wd, dyn=this.dyn;
+    for(let b=0;b<NL;b++){
+      const x=g[b], y=db?db[b]:20*Math.log10(x);
+      re[0][b]*=x; im[0][b]*=x; wd[0][b]+=y;
+      re[1][b]*=x; im[1][b]*=x; wd[1][b]+=y;
+      dyn[b]*=x;
+    }
+  }
+  frame(rp){
+    const p=this.p, bh=sampleRate/N, M=N-1, w=this.w, hm=H*1000/sampleRate;
+    const re=this.re, im=this.im, rr=this.rr, ri=this.ri, rdb=this.rdb, wd=this.wd;
+    const eqg=this.eqg, eqd=this.eqd, dyn=this.dyn, pos=this.pos, led=this.led;
+    const aK=1-Math.exp(-hm/(0.5*Math.pow(400,p[3]))), rK=1-Math.exp(-hm/(5*Math.pow(400,p[4])));
+    const aKc=1-Math.exp(-hm/(0.5*Math.pow(400,p[29]))), rKc=1-Math.exp(-hm/(5*Math.pow(400,p[30])));
+    const aKv=1-Math.exp(-hm/(0.5*Math.pow(400,p[36]))), rKv=1-Math.exp(-hm/(5*Math.pow(400,p[37])));
+    const aKe=1-Math.exp(-hm/(0.5*Math.pow(400,p[43]))), rKe=1-Math.exp(-hm/(5*Math.pow(400,p[44])));
+    const tH=-80+80*p[1], iR=1/(1+19*p[2]), mGR=24*p[5], tilt=(2*p[6]-1)*12, mix=p[8];
+    const gOn=p[11]>0.5, cOn=p[13]>0.5, vOn=p[31]>0.5, eOn=p[38]>0.5, sOn=p[49]>0.5;
+    const vT=-80+80*p[32], vIR=1/(1+19*p[33]), vDp=18*p[34], vW=0.02+0.48*p[35];
+    const eT=-80+80*p[39], eIR=1/(1+19*p[40]), eDp=24*p[42], eW=0.02+0.48*p[41], erm=p[45];
+    let au=Math.round(p[47]*4), ad=Math.round(p[48]*4), oi=Math.round(p[46]*23);
+    if(au<0) au=0; else if(au>4) au=4;
+    if(ad<0) ad=0; else if(ad>4) ad=4;
+    if(oi<0) oi=0; else if(oi>23) oi=23;
+    if(p[10]>0.5){ au=1; ad=3; }
+    const a1=(au===1||au===4);
+    /* analysis: window + FFT of the last N input samples, per channel; detector dB is normalised */
+    const hp=this.hp;
+    let eIn=0;
+    {
+      const hL=this.hist[0], hR=this.hist[1], zr=re[0], zi=im[0], xr=re[1], xi=im[1];
+      for(let i=0;i<N;i++){ const wi=w[i], j=(hp+i)&M; zr[i]=hL[j]*wi; zi[i]=hR[j]*wi; }
+      this.fft(zr,zi,1);
+      for(let b=0;b<NL;b++){
+        const n=(N-b)&M, ar=zr[b], ai=zi[b], br=zr[n], bi=zi[n];
+        zr[b]=(ar+br)*0.5; zi[b]=(ai-bi)*0.5; xr[b]=(ai+bi)*0.5; xi[b]=(br-ar)*0.5;
+      }
+    }
+    for(let c=0;c<2;c++){
+      const r=re[c], m=im[c], a=rr[c], q=ri[c], d=rdb[c], u=wd[c];
+      for(let b=0;b<NL;b++){
+        a[b]=r[b]; q[b]=m[b];
+        let pw=r[b]*r[b]+m[b]*m[b];
+        eIn+=pw;
+        if(pw<MIND) pw=MIND;
+        let x=10*Math.log10(pw)-DBN; if(x<MINDB) x=MINDB;
+        d[b]=x; u[b]=x;
+      }
+    }
+    for(let k=0;k<8;k++) led[k]=MINDB;
+    for(let b=0;b<NL;b++) dyn[b]=1;
+    this.hv=0; this.hs=-1;
+    /* the chain: gains applied in permuted order; the working dB spectrum walks with them */
+    for(let k=0;k<4;k++){
+      const st=this.perm[oi*4+k];
+      pos[st]=k;
+      if(st===0){
+        if(!gOn) continue;
+        let s=0;
+        for(let c=0;c<2;c++){
+          const g=eqg[c], d=eqd[c], u=wd[c], r=re[c], m=im[c];
+          for(let b=0;b<NL;b++){
+            const x=1-g[b];
+            s+=(r[b]*r[b]+m[b]*m[b])*x*x;
+            r[b]*=g[b]; m[b]*=g[b]; u[b]+=d[b];
+          }
+        }
+        led[0]=lvl(s,eIn);
+        continue;
+      }
+      if(st===1){
+        if(!cOn) continue;
+        if(a1&&ad===2){ this.cap(); this.hv=1; this.hs=1; }
+        const bE=this.bE, cdb=this.cdb, clin=this.clin, envC=this.envC, eA=this.eA, eB=this.eB, w0=wd[0], w1=wd[1];
+        for(let bd=0;bd<4;bd++){
+          const s0=bE[bd], s1=bE[bd+1];
+          let pk=MINDB;
+          for(let b=s0;b<s1;b++){ const m1=w0[b]>w1[b]?w0[b]:w1[b]; if(m1>pk) pk=m1; }
+          let e=envC[bd]; e+=(pk>e?aKc:rKc)*(pk-e); envC[bd]=e;
+          let gr=0;
+          if(p[17+bd]>0.5) gr=knee(e-(-80+80*p[21+bd]), 1/(1+11*p[25+bd]));
+          if(gr<-24) gr=-24;
+          for(let b=s0;b<s1;b++) cdb[b]=gr;
+        }
+        for(let q=1;q<=3;q++){ eA[q-1]=cdb[bE[q]-1]; eB[q-1]=cdb[bE[q]]; }
+        /* seam fades live inside the enabled bands only, and never wider than half of the narrower band, so a disabled
+           band keeps exactly 0 dB and two seams can never overwrite each other, however close the crossovers sit */
+        for(let q=1;q<=3;q++){
+          const e=bE[q], lE=p[16+q]>0.5, rE=p[17+q]>0.5;
+          if(!lE&&!rE) continue;
+          const lw=e-bE[q-1], rw=bE[q+1]-e, lA=eA[q-1], rA=eB[q-1];
+          let n, s0;
+          if(lE&&rE){ const m=lw<rw?lw:rw; let rb=(m>>1)-1; if(rb>RB) rb=RB; if(rb<0) continue; n=2*rb+1; s0=e-rb; }
+          else if(lE){ n=lw>>1; if(n>2*RB+1) n=2*RB+1; if(n<1) continue; s0=e-n; }
+          else{ n=rw>>1; if(n>2*RB+1) n=2*RB+1; if(n<1) continue; s0=e; }
+          for(let j=0;j<n;j++){
+            const x=s0+j; if(x<0||x>=NL) continue;
+            const t=(lE&&rE)?(j+1)/(n+1):(lE?(j+1)/n:(n>1?j/(n-1):1));
+            cdb[x]=lA+(rA-lA)*t;
+          }
+        }
+        for(let b=0;b<NL;b++) clin[b]=Math.pow(10,cdb[b]/20);
+        led[1]=lvl(this.ered(clin),eIn);
+        this.apply(clin,cdb);
+        continue;
+      }
+      if(st===2){
+        if(!sOn) continue;
+        if(a1&&ad===3){ this.cap(); this.hv=1; this.hs=2; }
+        const envS=this.envS, gRaw=this.gRaw, gSm=this.gSm, gT=this.gT, kern=this.kern, kR=this.kR, w0=wd[0], w1=wd[1];
+        for(let b=0;b<NL;b++){
+          const db=w0[b]>w1[b]?w0[b]:w1[b];
+          let e=envS[b]; e+=(db>e?aK:rK)*(db-e); envS[b]=e;
+          const f=(b>0?b:1)*bh;
+          let gr=knee(e-(tH+tilt*Math.log2(f/1000)), iR);
+          if(gr<-mGR) gr=-mGR;
+          gRaw[b]=mix*Math.pow(10,gr/20)+(1-mix);
+        }
+        if(kR===0){ for(let b=0;b<NL;b++) gSm[b]=gRaw[b]; }
+        else{
+          const n2=2*kR;
+          for(let b=0;b<NL;b++){
+            let a=0;
+            for(let j=0;j<=n2;j++){ let x=b+j-kR; if(x<0) x=0; else if(x>=NL) x=NL-1; a+=gRaw[x]*kern[j]; }
+            gSm[b]=a;
+          }
+        }
+        for(let b=0;b<NL;b++) gT[b]+=0.5*(gSm[b]-gT[b]);
+        led[2]=lvl(this.ered(gT),eIn);
+        this.apply(gT,null);
+        continue;
+      }
+      /* st===3: VELVET, the resonance tamer */
+      if(!vOn) continue;
+      if(a1&&ad===4){ this.cap(); this.hv=1; this.hs=3; }
+      const envV=this.envV, vRaw=this.vRaw, vSm=this.vSm, vel=this.vel, u0=wd[0], u1=wd[1];
+      for(let b=0;b<NL;b++){
+        const db=u0[b]>u1[b]?u0[b]:u1[b];
+        let e=envV[b]; e+=(db>e?aKv:rKv)*(db-e); envV[b]=e;
+        let gr=knee(e-vT, vIR);
+        if(gr<-vDp) gr=-vDp;
+        vRaw[b]=Math.pow(10,gr/20);
+      }
+      this.osm(vRaw,vSm,vW);
+      for(let b=0;b<NL;b++) vel[b]+=0.5*(vSm[b]-vel[b]);
+      led[3]=lvl(this.ered(vel),eIn);
+      this.apply(vel,null);
+    }
+    /* EXHUME: a second dynamics pass on the removed stream R = raw*eq*(1-D) */
+    const ex=this.ex, envE=this.envE;
+    if(eOn){
+      const eRaw=this.eRaw, eSm=this.eSm, r0=rdb[0], r1=rdb[1];
+      for(let b=0;b<NL;b++){
+        const d=dyn[b], ddB=20*Math.log10(d<1?1-d:1e-6);
+        const x0=r0[b]+(gOn?eqd[0][b]:0), x1=r1[b]+(gOn?eqd[1][b]:0);
+        const rd=(x0>x1?x0:x1)+ddB;
+        let e=envE[b]; e+=(rd>e?aKe:rKe)*(rd-e); envE[b]=e;
+        let gr=knee(e-eT, eIR);
+        if(gr<-eDp) gr=-eDp;
+        eRaw[b]=Math.pow(10,gr/20);
+      }
+      this.osm(eRaw,eSm,eW);
+      for(let b=0;b<NL;b++) ex[b]+=0.5*(eSm[b]-ex[b]);
+    }
+    else{ for(let b=0;b<NL;b++) ex[b]=1; }
+    /* composite gain per bin: display removal and the ledger, from the gains actually applied */
+    const rem=this.rem, rcv=this.rcv, tA=p[52], tB=1-tA, tw=this.tw, hw=this.hw, hl=this.hl;
+    /* RESURRECT: inside each aimed focus find the real fundamental (octave-safe), then the real harmonic peaks in the spectrum itself.
+       The fundamental is the candidate whose harmonic series the spectrum best supports, so aiming at a harmonic still finds the root.
+       Nothing is synthesised: the comb only widens what the restore may give back from the removed stream. */
+    let hn=0;
+    for(let b=0;b<NL;b++) hw[b]=0;
+    if(eOn&&p[53]>0.001&&tA>0.001&&this.tgn>0){
+      const rA=p[53], ords=2+Math.round(10*p[55]), dec=0.5+0.5*p[56], tol=0.005+0.055*p[57];
+      const hf=Math.pow(2,((0.15+1.35*p[54])/2.355)*1.5), r0=rdb[0], r1=rdb[1], nyq=sampleRate*0.49, cb=this.cb, cv=this.cv;
+      for(let i=0;i<this.tgn;i++){
+        const fi=this.tgp[i*2], wi=this.tgp[i*2+1], pins=this.tps[i], vets=this.tvs[i];
+        let bLo=Math.round(fi/hf/bh), bHi=Math.round(fi*hf/bh);
+        if(bLo<2) bLo=2; if(bHi>NB-2) bHi=NB-2; if(bHi<bLo) bHi=bLo;
+        cb[0]=-1; cb[1]=-1; cb[2]=-1; cv[0]=-1e9; cv[1]=-1e9; cv[2]=-1e9;
+        for(let b=bLo;b<=bHi;b++){
+          const v=r0[b]>r1[b]?r0[b]:r1[b];
+          if(v<=-110) continue;
+          const l=r0[b-1]>r1[b-1]?r0[b-1]:r1[b-1], r=r0[b+1]>r1[b+1]?r0[b+1]:r1[b+1];
+          if(v<l||v<r) continue;
+          if(v>cv[0]){ cv[2]=cv[1]; cb[2]=cb[1]; cv[1]=cv[0]; cb[1]=cb[0]; cv[0]=v; cb[0]=b; }
+          else if(v>cv[1]){ cv[2]=cv[1]; cb[2]=cb[1]; cv[1]=v; cb[1]=b; }
+          else if(v>cv[2]){ cv[2]=v; cb[2]=b; }
+        }
+        if(cb[0]<0) continue;
+        const ref=cv[0];
+        let bestS=-1, bestF=0;
+        for(let q=0;q<3;q++){
+          if(cb[q]<0) continue;
+          for(let m=1;m<=4;m++){
+            const fc=cb[q]*bh/m;
+            if(fc<40) break;
+            let num=0, den=0, mid=0, mdn=0;
+            for(let k=1;k<=8;k++){
+              const x=fc*k; if(x>nyq) break;
+              num+=this.sal(x,ref,tol)/k; den+=1/k;
+              const xm=fc*(k+0.5);
+              if(k<8&&xm<=nyq&&fc>=150){ mid+=this.sal(xm,ref,tol); mdn+=1; }
+            }
+            const S=(den>0?num/den:0)-0.6*(mdn>0?mid/mdn:0);
+            if(S>bestS+1e-6||(S>bestS-1e-6&&fc>bestF)){ bestS=S; bestF=fc; }
+          }
+        }
+        if(bestS>0.12){
+          let fs=0, ws=0;
+          for(let k=1;k<=6;k++){
+            const x=bestF*k; if(x>nyq) break;
+            if(this.sal(x,ref,tol)>0.35){ const qb=this.qb, dq=this.pfr(qb); fs+=((qb+dq)*bh)/(k*k); ws+=1/k; }
+          }
+          this.f0[i]+=0.35*((ws>0?fs/ws:bestF)-this.f0[i]);
+        }
+        const f0=this.f0[i];
+        for(let k=1;k<=ords;k++){
+          const ideal=f0*k; if(ideal>nyq) break;
+          const qv=this.pkn(ideal,tol), qb=this.qb;
+          if(qb<0) continue;
+          const st=((pins>>(k-1))&1)?1:(((vets>>(k-1))&1)?2:0);
+          if(st===0&&qv<ref-50) continue;
+          if(st===1&&qv<-110) continue;
+          const amp=st===1?rA*wi:rA*wi*Math.pow(dec,k-1);
+          if(st!==2){ for(let b=qb-3;b<=qb+3;b++){ if(b<0||b>=NL) continue; const z=(b-qb)/1.3, g=amp*Math.exp(-0.5*z*z); if(g>hw[b]) hw[b]=g; } }
+          if(hn<96){ hl[hn*5]=(qb+this.pfr(qb))*bh; hl[hn*5+1]=amp; hl[hn*5+2]=k; hl[hn*5+3]=i; hl[hn*5+4]=st; hn++; }
+        }
+      }
+    }
+    this.hn=hn;
+    let sRc=0, sPm=0, sTt=0;
+    for(let b=0;b<NL;b++){
+      const d=dyn[b], k2=eOn?ex[b]:0, rf=k2*erm*(tB+tA*(tw[b]>hw[b]?tw[b]:hw[b])), dc=d+(1-d)*rf;
+      rem[b]=-20*Math.log10(dc>1e-6?dc:1e-6);
+      rcv[b]=(eOn&&d<1)?Math.min(24,20*Math.log10(dc/(d>1e-6?d:1e-6))):0;
+      for(let c=0;c<2;c++){
+        const pw=rr[c][b]*rr[c][b]+ri[c][b]*ri[c][b], q=gOn?eqg[c][b]:1;
+        const a=q*(1-d)*rf, x=q*(1-d)*(1-rf), t=1-q*dc;
+        sRc+=pw*a*a; sPm+=pw*x*x; sTt+=pw*t*t;
+      }
+    }
+    led[4]=lvl(sRc,eIn); led[5]=lvl(sPm,eIn); led[6]=lvl(sTt,eIn);
+    /* assembly, per audition mode */
+    if(a1&&ad>=2){
+      if(this.hv&&this.hs===ad-1){
+        const g=this.hs===1?this.clin:(this.hs===2?this.gT:this.vel), gp=gOn&&pos[0]>pos[this.hs];
+        for(let c=0;c<2;c++){
+          const r=re[c], m=im[c], a=this.ar[c], d=this.ai[c], q=eqg[c];
+          for(let b=0;b<NL;b++){ const x=(1-g[b])*(gp?q[b]:1); r[b]=a[b]*x; m[b]=d[b]*x; }
+        }
+      }
+      else{ for(let c=0;c<2;c++){ const r=re[c], m=im[c]; for(let b=0;b<NL;b++){ r[b]=0; m[b]=0; } } }
+    }
+    else{
+      for(let b=0;b<NL;b++){
+        const d=dyn[b], k2=eOn?ex[b]:0, rf=k2*erm*(tB+tA*(tw[b]>hw[b]?tw[b]:hw[b])), dc=d+(1-d)*rf;
+        for(let c=0;c<2;c++){
+          const q=gOn?eqg[c][b]:1;
+          let g;
+          if(a1&&ad===1) g=gOn?1-q:0;
+          else if(au===0) g=q*dc;
+          else if(a1) g=q*(1-d);
+          else if(au===2) g=q*(1-d)*rf;
+          else g=q*(1-d)*(1-rf);
+          re[c][b]=rr[c][b]*g; im[c][b]=ri[c][b]*g;
+        }
+      }
+    }
+    /* conjugate mirrors, synthesis, overlap-add */
+    {
+      const lr=re[0], li=im[0], rr2=re[1], ri2=im[1], aL=this.acc[0], aR=this.acc[1];
+      li[0]=0; li[NB]=0; ri2[0]=0; ri2[NB]=0;    /* DC and Nyquist of a real signal are real */
+      for(let b=1;b<NB;b++){ lr[N-b]=lr[b]; li[N-b]=-li[b]; rr2[N-b]=rr2[b]; ri2[N-b]=-ri2[b]; }
+      for(let k=0;k<N;k++){ const pr=lr[k]-ri2[k], pi=li[k]+rr2[k]; lr[k]=pr; li[k]=pi; }
+      this.fft(lr,li,-1);
+      for(let i=0;i<N;i++){ const g=w[i]*COLA, j=(rp+i)&M; aL[j]+=lr[i]*g; aR[j]+=li[i]*g; }
+    }
+    /* meter: 256 input bands, 256 composite-removal bands, 7 ledger slots, 1 simulation flag */
+    const mb=this.mb;
+    mb.fill(MINDB,0,256); mb.fill(0,256,512); mb.fill(0,522,1259);
+    const ml=this.ml, mh=this.mh, mw=this.mw, q0=rdb[0], q1=rdb[1];
+    for(let j=0;j<256;j++){
+      const lo=ml[j], hi=mh[j];
+      let v, g, rc2;
+      if(hi>=lo){
+        v=-1e9; g=0; rc2=0;
+        for(let b=lo;b<=hi;b++){ const x=q0[b]>q1[b]?q0[b]:q1[b]; if(x>v) v=x; if(rem[b]>g) g=rem[b]; if(rcv[b]>rc2) rc2=rcv[b]; }
+      }
+      else{
+        const bn=lo, d=mw[j], bm=bn-1, bp=bn+1;
+        const ym=Math.pow(10,(q0[bm]>q1[bm]?q0[bm]:q1[bm])/20), y0=Math.pow(10,(q0[bn]>q1[bn]?q0[bn]:q1[bn])/20), yp=Math.pow(10,(q0[bp]>q1[bp]?q0[bp]:q1[bp])/20);
+        let a=y0+d*(yp-ym)*0.5+d*d*(yp-2*y0+ym)*0.5; if(a<1e-9) a=1e-9;
+        v=20*Math.log10(a);
+        const bf=d>=0?bn:bm, u=d>=0?d:d+1, c0=1-u, b1=bf+1;
+        g=c0*rem[bf]+u*rem[b1]; rc2=c0*rcv[bf]+u*rcv[b1];
+      }
+      mb[j]=v<MINDB?MINDB:v; mb[256+j]=g; mb[522+j]=rc2;
+    }
+    for(let k=0;k<7;k++) mb[512+k]=led[k];
+    mb[519]=au===4?1:0;
+    mb[778]=hn;
+    for(let j=0;j<hn*5;j++) mb[779+j]=hl[j];
+  }
+  process(inputs, outputs){
+    const o=outputs[0];
+    if(!o||!o.length) return true;
+    const L=o[0], R=o[1]||o[0], Q=L.length;
+    const inp=inputs[0], iL=(inp&&inp.length)?inp[0]:null, iR=(inp&&inp.length>1)?inp[1]:null;
+    const M=N-1, hist=this.hist, dl=this.dl, acc=this.acc, lv=this.p[0];
+    let hp=this.hp, wi=this.wi, ep=this.ep, tot=this.tot, inPk=0, outPk=0, rec=this.rec, rn=this.rn;
+    const rb=this.rb;
+    if(this.asleep){
+      let pk=0;
+      for(let i=0;i<Q;i++){
+        if(iL){ const a=iL[i]<0?-iL[i]:iL[i]; if(a>pk) pk=a; }
+        if(iR){ const a=iR[i]<0?-iR[i]:iR[i]; if(a>pk) pk=a; }
+      }
+      if(pk>1e-5){ this.asleep=false; this.quiet=0; this.oq=0; }
+    }
+    if(this.asleep){
+      for(let i=0;i<Q;i++){
+        let xL=iL?iL[i]:0, xR=iR?iR[i]:xL;
+        if(!(xL>-1e4&&xL<1e4)) xL=0; if(!(xR>-1e4&&xR<1e4)) xR=0;
+        dl[0][wi]=xL; dl[1][wi]=xR; wi=(wi+1)&M;
+        hist[0][hp]=xL; hist[1][hp]=xR; hp=(hp+1)&M;
+        tot++; ep=(ep+1)&M;
+        L[i]=0; if(R!==L) R[i]=0;
+        if(rec){ rb[rn++]=0; rb[rn++]=0; if(rn>=1024){ this.port.postMessage(this.rm); rn=0; } }
+      }
+      this.hp=hp; this.wi=wi; this.ep=ep; this.tot=tot; this.rn=rn;
+      if(currentTime-this.lastT>0.25){
+        const mb=this.mb;
+        mb.fill(MINDB,0,256); mb.fill(0,256,512); mb.fill(MINDB,512,519); mb.fill(0,522,1259);
+        mb[519]=(this.p[10]<=0.5&&Math.round(this.p[47]*4)===4)?1:0; mb[520]=0; mb[521]=this.fe>255?255:this.fe;
+        this.lastT=currentTime;
+        this.port.postMessage(this.mm);
+      }
+      return true;
+    }
+    const tgt=this.byp?1:0, step=1/N;
+    let bb=this.xw;
+    /* loudness-matched A/B: wet energy is steered to dry energy (400 ms, +-12 dB), FINAL audition only */
+    let au=Math.round(this.p[47]*4); if(this.p[10]>0.5) au=1;
+    const split=(au===4&&this.p[51]>0.5), match=(au===0&&this.p[50]>0.5);
+    const ka=1/(0.4*sampleRate);
+    let ed=this.ed, ew=this.ew, mg0=this.mg, tg=mg0;
+    if(ed>1e-9&&ew>1e-9){ tg=Math.sqrt(ed/ew); if(tg<0.25) tg=0.25; else if(tg>4) tg=4; }
+    const mg1=mg0+0.2*(tg-mg0), mgs=(mg1-mg0)/Q;
+    let gm=mg0;
+    for(let i=0;i<Q;i++){
+      let xL=iL?iL[i]:0, xR=iR?iR[i]:xL;
+      if(!(xL>-1e4&&xL<1e4)) xL=0; if(!(xR>-1e4&&xR<1e4)) xR=0;
+      const a1=xL<0?-xL:xL, a2=xR<0?-xR:xR;
+      if(a1>inPk) inPk=a1; if(a2>inPk) inPk=a2;
+      const dL=dl[0][wi], dR=dl[1][wi];
+      dl[0][wi]=xL; dl[1][wi]=xR; wi=(wi+1)&M;
+      hist[0][hp]=xL; hist[1][hp]=xR; hp=(hp+1)&M;
+      tot++;
+      /* emit the WOLA stream first: a frame written this iteration drains one ring later */
+      const sL=acc[0][ep], sR=acc[1][ep];
+      acc[0][ep]=0; acc[1][ep]=0; ep=(ep+1)&M;
+      if(tot%H===0){
+        this.hp=hp; this.tot=tot;
+        try{ this.frame(tot&M); }catch(err){ this.quiet=0; if(this.fe<1e9) this.fe++; if(this.fe===1||this.fe%1000===0){ try{ console.error('ossuary: frame threw (#'+this.fe+') '+(err&&err.stack||err)); }catch(_){} } }
+      }
+      ed+=ka*((dL*dL+dR*dR)-ed); ew+=ka*((sL*sL+sR*sR)-ew);
+      gm+=mgs;
+      if(bb<tgt){ bb+=step; if(bb>tgt) bb=tgt; }
+      else if(bb>tgt){ bb-=step; if(bb<tgt) bb=tgt; }
+      let yL, yR;
+      if(split){ yL=(dL+dR)*0.5; yR=(sL+sR)*0.5; }
+      else if(match){ yL=sL*gm*(1-bb)+dL*bb; yR=sR*gm*(1-bb)+dR*bb; }
+      else{ yL=sL*(1-bb)+dL*bb; yR=sR*(1-bb)+dR*bb; }
+      if(rec){ rb[rn++]=yL; rb[rn++]=yR; if(rn>=1024){ this.port.postMessage(this.rm); rn=0; } }
+      const oL=ceil1(yL*lv), oR=ceil1(yR*lv);
+      L[i]=oL; if(R!==L) R[i]=oR;
+      const a3=oL<0?-oL:oL, a4=oR<0?-oR:oR;
+      if(a3>outPk) outPk=a3; if(a4>outPk) outPk=a4;
+    }
+    this.hp=hp; this.wi=wi; this.ep=ep; this.tot=tot; this.xw=bb; this.rn=rn; this.ed=ed; this.ew=ew; this.mg=mg1;
+    /* asleep once the input has sat under -100 dBFS for 2N+H samples (all in-flight audio has drained
+       through the latency and the WOLA tail) and the output for 8 blocks */
+    if(inPk>1e-5) this.quiet=0; else this.quiet++;
+    if(outPk>1e-5) this.oq=0; else this.oq++;
+    if(this.quiet*Q>=2*N+H && this.oq>=8){
+      this.asleep=true; this.quiet=0;
+      acc[0].fill(0); acc[1].fill(0);
+      this.xw=tgt;
+    }
+    if(currentTime-this.lastT>=0.016){
+      this.lastT=currentTime;
+      this.mb[520]=match?20*Math.log10(mg1):0; this.mb[521]=this.fe>255?255:this.fe;
+      this.port.postMessage(this.mm);
+    }
+    return true;
+  }
+}
+registerProcessor(PROC, OssuaryFX);
+`;
+
+/* ═══════════ THΞ FΛCΞ ═══════════ */
+const $=id=>document.getElementById(id);
+const state={ p:P.map(q=>q.d) };
+const KI={}; P.forEach((q,i)=>{ KI[q.k]=i; });
+let ctx=null, node=null, powered=false, booting=false, srNow=48000, grNow=0, ledCnt=0;
+const say=t=>{ const e=$('live'); if(e) e.textContent=t; };
+let HOLD_T='', HOLD_U=0;
+const stat=(t,bad)=>{ const s=$('stat'); if(s._t!==t){ s._t=t; s.textContent=t; } s.classList.toggle('err',!!bad); };
+/* a warning stays on the status line for a few seconds, so the live readout cannot wipe it before it is read */
+const warn=t=>{ HOLD_T=t; HOLD_U=Date.now()+5000; stat(t,true); say(t); };
+
+let ERRN=0;
+/* ── run mode: in a rack, or standalone ─────────────────────────────────────────────────────────────────────────
+   SRCD_HOSTED (shared header) only says "there is a parent frame". HOSTED says "a rack is, or may still be, there".
+   It starts equal to SRCD_HOSTED and drops to false only when POWER finds no rack answering wl-mount (PROBE_MS), so a
+   page sitting in a plain iframe (a preview pane, a host that is not a rack) still runs. If a rack speaks later the face
+   hands the audio back (rackHeard), so a rack never ends up with a private context beside its own.
+   URL hash: #standalone forces standalone · #rack forces hosted (fail closed, no fallback) · #sp forces the main-thread engine. */
+let HOSTED=SRCD_HOSTED, RACK_SEEN=false, FALLBACK=false, ENG='';
+const MODE_HASH=(function(){ try{ return String(location.hash||'').toLowerCase(); }catch(_){ return ''; } })();
+const MODE_FORCE=/standalone|solo/.test(MODE_HASH)?'solo':((SRCD_HOSTED&&/rack|hosted/.test(MODE_HASH))?'rack':'');
+const FORCE_SP=/\bsp\b|scriptprocessor/.test(MODE_HASH);
+if(MODE_FORCE==='solo') HOSTED=false;
+const PROBE_MS=2500, SPBUF=2048;
+const idleStr=()=>HOSTED?'in a rack · power to mount':(MODE_FORCE==='solo'?'standalone · power to start':(FALLBACK?'no rack answered · standalone · power to start':(SRCD_HOSTED?'no rack here · standalone · power to start':'standalone · power to start')));
+const send=(...m)=>{ if(node) node.port.postMessage(m); };
+/* gate curves: the face's editable copy; the worklet holds its own tables */
+let eqL=[[100,0],[10000,0]], eqR=[[100,0],[10000,0]];
+const fad={}, BT={}, LEDS={};
+const TOGS=['psp','son','gte','glk','con','ce0','ce1','ce2','ce3','von','eon','byp'];
+const AUDL=['FINAL','REMOVED','RECOVERED','PERMANENT','PREPARED'];
+const ADSTL=['CHAIN','GATE','CRYPT','SHROUD','VELVET'];
+function ordStr(oi){
+  let s='';
+  for(let k=0;k<4;k++){ s+=STAGES[PERMS[oi*4+k]].charAt(0); if(k<3) s+='>'; }
+  return s;
+}
+function mkTog(i, parent){
+  const q=P[i], b=document.createElement('button');
+  b.className='tog'; b.textContent=q.n; b.setAttribute('aria-pressed','false');
+  b.addEventListener('click', ()=>{
+    const v=state.p[i]>0.5?0:1;
+    show(i, v); send('p', i, state.p[i]);
+    if(q.k==='glk'&&v>0.5){ eqR=eqL.map(a=>[a[0],a[1]]); sendEq(); }
+    drawEq();
+  });
+  BT[q.k]=b; parent.appendChild(b);
+  return b;
+}
+const fdb=v=>(v>-99.95?(v>0?'+':'')+v.toFixed(1):'-inf')+' dB';
+const fms=v=>v<10?v.toFixed(1)+' ms':v<1000?Math.round(v)+' ms':(v/1000).toFixed(2)+' s';
+const fhz=v=>v<1000?Math.round(v)+' Hz':(v/1000).toFixed(2)+' kHz';
+const hopMs=()=>512*1000/(srNow||48000);
+const frt=n=>v=>(1+n*v).toFixed(1)+':1', fat=v=>{ const m=0.5*Math.pow(400,v); return fms(m)+(m<hopMs()?' · 1 frame':''); }, frl=v=>fms(5*Math.pow(400,v));
+const fth=v=>fdb(-80+80*v), foc=v=>(0.02+0.48*v).toFixed(2)+' oct', fpc=v=>Math.round(v*100)+' %';
+const UNIT={ lvl:v=>v<0.0005?'-inf dB':fdb(20*Math.log10(v)), thr:fth, ct0:fth, ct1:fth, ct2:fth, ct3:fth, vth:fth, eth:fth,
+  rat:frt(19), vrt:frt(19), ert:frt(19), cr0:frt(11), cr1:frt(11), cr2:frt(11), cr3:frt(11),
+  atk:fat, cat:fat, vak:fat, eat:fat, rel:frl, crl:frl, vrl:frl, erl:frl, vsg:foc, esk:foc, mix:fpc, erm:fpc,
+  mgr:v=>(24*v).toFixed(1)+' dB', vdp:v=>(18*v).toFixed(1)+' dB', edx:v=>(24*v).toFixed(1)+' dB',
+  tlt:v=>((2*v-1)*12).toFixed(1)+' dB/oct', smt:v=>(8*v).toFixed(1)+' bins',
+  cx1:v=>fhz(40*Math.pow(20,v)), cx2:v=>fhz(200*Math.pow(16,v)), cx3:v=>fhz(800*Math.pow(15,v)), etg:fpc, ehm:fpc, etw:v=>{ const o=0.15+1.35*v; return o.toFixed(2)+' oct · '+(o<0.5?'narrow':(o<1.2?'mid':'wide')); }, ehn:v=>(2+Math.round(10*v))+' orders', ehd:v=>(0.5+0.5*v).toFixed(2)+' /order', eht:v=>'±'+(0.5+5.5*v).toFixed(1)+' %' };
+const fmt=(k,v)=>UNIT[k]?UNIT[k](v):Math.round(v*100)+'';
+const FADERS=['mix','mgr','ct0','ct1','ct2','ct3','vdp','edx','erm','etg','ehm'];
+/* colour = which side of the system a control acts on: blood for the removal stages, the antidote hue for resurrection */
+const RESK=['eth','ert','esk','edx','eat','erl','erm','etg','ehm','etw','ehn','ehd','eht'], FAMC={ blood:'#c2183b', res:'#7cf5dc' };
+function fluidD(v){ const y=56.2-v*48.4; return v<=0.005?'':'M0 '+y.toFixed(2)+'Q8 '+(y-2.2).toFixed(2)+' 16 '+y.toFixed(2)+'T32 '+y.toFixed(2)+'T48 '+y.toFixed(2)+'T64 '+y.toFixed(2)+'V64H0Z'; }
+function dripUpd(drips, v){
+  drips.forEach(p=>{
+    const y=+p.getAttribute('data-y'), L=v<0.1?0:Math.min((v-0.1)/0.9*8, 56.2-y);
+    p.setAttribute('d', L>0.4?'M'+p.getAttribute('data-x')+' '+y+'v'+L.toFixed(2):'');
+  });
+}
+/* skull knob: drag up/down (shift = fine), double-tap resets, arrows/home/end from the keyboard */
+/* SKG:BEGIN skull generator: bilateral and seeded; pure data in, drawing steps out */
+const SKG=(function(){
+  const f2=v=>String(Math.round(v*100)/100);
+  function xf(d,fx,fy){
+    let o='', cmd='', k=0;
+    (d.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)/g)||[]).forEach(t=>{
+      if(/[A-Za-z]/.test(t)){ cmd=t; k=0; o+=t; return; }
+      const v=+t, r=cmd==='H'?fx(v):(cmd==='V'?fy(v):((k%2===0)?fx(v):fy(v)));
+      k++; o+=f2(r)+' ';
+    });
+    return o;
+  }
+  const mir=d=>xf(d,x=>64-x,y=>y);
+  const ovl=d=>xf(d,x=>Math.abs(x-32)<1e-9?32.4:x,y=>y);
+  const scl=(d,cx,cy,sx,sy)=>xf(d,x=>cx+(x-cx)*sx,y=>cy+(y-cy)*sy);
+  const B='url(#gBone)';
+  function both2(a,dl,dr,fill,under){
+    if(under) a.push({d:dl+mir(dr),fill:'#000',stroke:'#000',sw:under,lj:1});
+    a.push({d:ovl(dl),fill:fill},{d:mir(ovl(dr)),fill:fill});
+  }
+  const both=(a,d,fill,under)=>both2(a,d,d,fill,under);
+  const dark=(a,d,cls)=>a.push({d:ovl(d),cls:cls||'dk'},{d:mir(ovl(d)),cls:cls||'dk'});
+  const line=(a,d,col,w)=>a.push({d:d+mir(d),fill:'none',stroke:col,sw:w,lc:1});
+  const solo=(a,d,fill,under)=>a.push({d:d,fill:'#000',stroke:'#000',sw:under,lj:1},{d:d,fill:fill});
+  const one=(a,d,o)=>a.push(Object.assign({d:d,fill:'none'},o));
+  function rng(s){ let a=s>>>0; return function(){ a=(a+0x6D2B79F5)>>>0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+  function demon(R){
+    const J=(x,y)=>x+(y-x)*R(), P=l=>l[Math.floor(R()*l.length)], Y=p=>R()<p, a=[];
+    const HS=P(['M23.8 21.2C19.4 18.6 16.4 15.4 17.5 11.5C20.2 13.8 23.6 15.6 27.4 17Z','M23.2 22.4C17.4 24 12.8 20.4 14.2 15C16.8 18.6 20.8 19.8 26 18.8Z','M24 21.5L17.6 12.6L28 18.6Z','M23.6 22C16.6 22.8 12.6 19 13.8 14.8C15.4 17.4 19 18.4 24.6 17.6Z']);
+    both2(a,scl(HS,24,21,J(.88,1.1),J(.88,1.1)),scl(HS,24,21,J(.88,1.1),J(.88,1.1)),B,1.7);
+    if(Y(.7)) solo(a,'M29.8 19L32 '+f2(J(7.6,10.4))+'L34.2 19Z',B,1.5);
+    both(a,P(['M32 17C25.4 17 21 20.6 20.4 25.6C19.8 30 20.4 34 22.8 37L24.4 44.4L28 48L32 49Z','M32 17.4C25 17.4 20.6 21 20 26C19.6 30.4 21 34.4 23.6 37.4L25 44.6L28.4 48.4L32 49.2Z']),B,1.7);
+    if(Y(.6)) both(a,'M20.4 30L'+f2(J(13.6,15.6))+' '+f2(J(30.2,32.6))+'L20.8 35Z','#d3c7a8',1.4);
+    if(Y(.65)) solo(a,'M30 48.4L32 '+f2(J(53.2,56))+'L34 48.4Z','#cdbf9f',1.4);
+    const ed=P(['M22.6 29.4L30.6 31.8L29.6 34.2L23.4 32.2Z','M22.8 27.6L30.4 29.8L29.6 35.2L24 34.4Z','M23 31.4C23 28.6 25 27.2 27 27.2C29.2 27.2 30.8 28.8 30.8 31.2C30.8 34 29 35.2 27 35.2C25 35.2 23 34 23 31.4Z']);
+    dark(a,ed,'eye');
+    const third=Y(.35);
+    if(third) one(a,'M32 21.2L33.8 24L32 26.8L30.2 24Z',{cls:'eye'});
+    if(ed.indexOf('C')<0) line(a,'M21.2 26.6L31 29.2','#07070a',f2(J(1.2,2.2)));
+    dark(a,'M31.2 37.4L30.6 40.6L31.8 39.6Z');
+    const mo=P(['strip','fangs','maw']);
+    if(mo==='strip') both(a,'M24 43H32V44L30.2 48L28.6 44.2L26.8 48.4L25 44.4Z','#fffaf0',1.2);
+    else if(mo==='fangs'){ line(a,'M24 43.4L32 44.6','#3a3426','.9'); both2(a,'M25.4 43.6L28 44.2L26.8 '+f2(J(49.2,52))+'Z','M25.4 43.6L28 44.2L26.8 '+f2(J(49.2,52))+'Z','#fffaf0',1.3); }
+    else{ dark(a,'M24 42.6H32V47.8H26Q24 47.8 24 46Z'); both(a,'M24.4 42.6L26.6 42.6L25.6 47Z','#fffaf0',1.1); both(a,'M27.6 42.6L29.6 42.6L28.6 45.8Z','#fffaf0',1.1); solo(a,'M30.4 42.6H33.6L32 46.4Z','#fffaf0',1); }
+    if(!third && Y(.5)) one(a,'M30 20.4L32 24.2L34 20.4',{stroke:'#6a6250',sw:.9,lc:1});
+    if(Y(.4)){ const c='M26.2 17.6L25.2 21.8L26.8 25.2'; one(a,Y(.5)?c:mir(c),{stroke:'#4f4838',sw:.7,lc:1}); }
+    return {steps:a,rot:f2(J(-3,3)),sx:f2(J(.95,1.06)),sy:f2(J(.96,1.05))};
+  }
+  function vampire(R){
+    const J=(x,y)=>x+(y-x)*R(), P=l=>l[Math.floor(R()*l.length)], Y=p=>R()<p, a=[];
+    if(Y(.72)) both(a,scl('M31 47L21 41L13.4 27.6L15 45.6L22 52L31 53.4Z',31,47,1,J(.9,1.08)),P(['#6b6350','#5f5844','#776e58']),1.4);
+    const E=P(['M22.6 24L16.2 13L27.4 19.2Z','M22.8 24.4L17.8 15L27.2 20Z','M23 24.6L19.2 17.4L27 21.8Z']);
+    both2(a,scl(E,22.6,24,1,J(.92,1.08)),scl(E,22.6,24,1,J(.92,1.08)),B,1.7);
+    both(a,P(['M32 15.2C26.2 15.2 22.4 18.6 21.8 24C21.3 28 22 32 24 35.4L26.4 44.6L32 49Z','M32 15.4C26 15.4 22 18.8 21.4 24.2C21 28.2 21.8 32.2 24 35.6L26 43.8Q27 48 32 48.6Z']),B,1.7);
+    const ey=P(['M23.4 28.4L30.4 30.4L29.4 34.2L24.4 32.8Z','M23.4 31.2C23.4 28.8 25 27.6 26.8 27.6C28.8 27.6 30.2 29 30.2 31.2C30.2 33.4 28.6 34.6 26.8 34.6C25 34.6 23.4 33.6 23.4 31.2Z','M23.2 30L30.6 31.4L29.8 33.6L24 32.6Z']);
+    dark(a,ey,'eye');
+    if(ey.indexOf('C')>0){ const pu='M26.8 29.6L27.8 31L26.8 32.4L25.8 31Z'; a.push({d:pu+mir(pu),fill:'#fff6dc'}); }
+    dark(a,'M31.2 37.6L30.6 40.8L31.8 39.8Z');
+    line(a,'M25 43Q28.6 45.2 32 45','#3a3426','.9');
+    const fl=J(49.2,52.6), fr=Y(.12)?J(45.4,46.6):J(49.2,52.6);
+    both2(a,'M26.6 42.8L28.8 43.2L27.7 '+f2(fl)+'Z','M26.6 42.8L28.8 43.2L27.7 '+f2(fr)+'Z','#fffaf0',1.3);
+    if(Y(.5)) both(a,'M29.8 43.8L31.6 44.1L30.9 46.2Z','#fffaf0',1);
+    if(Y(.6)) one(a,'M26 17.4L32 22.4L38 17.4',{stroke:'#6a6250',sw:1,lc:1});
+    if(Y(.5)) line(a,'M24.2 35.6L26.8 38.4','#7a7058','.7');
+    if(Y(.3)){ const c='M26.4 17.4L25.6 20.8L27 23.4'; one(a,Y(.5)?c:mir(c),{stroke:'#4f4838',sw:.7,lc:1}); }
+    return {steps:a,rot:f2(J(-3,3)),sx:f2(J(.95,1.06)),sy:f2(J(.96,1.05)),drip:[[27.7,f2(fl)],[36.3,f2(fr)]]};
+  }
+  function build(role,seed){ const R=rng(seed*2654435761+97); R(); R(); return role==='big'?demon(R):vampire(R); }
+  return {build:build,mir:mir,ovl:ovl,scl:scl};
+})();
+/* SKG:END */
+const BIG=['thr','rat','vth','vrt','eth','ert'];   /* the primary control of each stage wears a big demon; the rest wear fanged vampires */
+const SKN=['Mixed','Horned','Ram','Oni','Faceted','Vampire','Demon'], KNOBS=[], SKP=[];
+let SKIN=0;
+const SVGNS=$('defs').namespaceURI;
+function skullDom(role, seed){
+  const g=SKG.build(role, seed), f=$('tpl-sk0').content.cloneNode(true), sk=f.querySelector('.sk');
+  const ig=document.createElementNS(SVGNS,'g');
+  sk.textContent='';
+  ig.setAttribute('transform','translate(32 33) rotate('+g.rot+') scale('+g.sx+' '+g.sy+') translate(-32 -33)');
+  g.steps.forEach(st=>{
+    const p=document.createElementNS(SVGNS,'path');
+    p.setAttribute('d',st.d); p.setAttribute('fill',st.fill||'none');
+    if(st.stroke){ p.setAttribute('stroke',st.stroke); p.setAttribute('stroke-width',st.sw); }
+    if(st.lj) p.setAttribute('stroke-linejoin','round');
+    if(st.lc) p.setAttribute('stroke-linecap','round');
+    if(st.cls) p.setAttribute('class',st.cls);
+    ig.appendChild(p);
+  });
+  if(g.drip) g.drip.forEach(t=>{ const dp=document.createElementNS(SVGNS,'path'); dp.setAttribute('class','drip'); dp.setAttribute('data-x',t[0]); dp.setAttribute('data-y',t[1]); dp.setAttribute('d',''); ig.appendChild(dp); });
+  sk.appendChild(ig);
+  return f;
+}
+function setSkin(n){ n=Math.round(+n); SKIN=(n===n)?((n%7)+7)%7:0; $('skull-name').textContent=SKN[SKIN]; SKP.forEach((b,i)=>b.classList.toggle('on',i===SKIN)); KNOBS.forEach(f=>f()); }
+function mkKnob(i, parent){
+  const q=P[i], k=q.k, el=document.createElement('div'), lb=document.createElement('div'), vl=document.createElement('div');
+  const big=BIG.indexOf(k)>=0; el.className=big?'kn big':'kn';   const fam=RESK.indexOf(k)>=0?'res':'blood'; el.setAttribute('data-fam',fam); el.style.setProperty('--fc',FAMC[fam]); el.tabIndex=0; el.setAttribute('role','slider'); el.setAttribute('aria-label',q.n); el.setAttribute('aria-valuemin','0'); el.setAttribute('aria-valuemax','1');
+  lb.className='kl'; vl.className='kv'; lb.textContent=q.n;
+  const hd=document.createElement('div'); hd.className='kh'; el.append(hd, lb, vl); parent.appendChild(el);
+  let arc, pt, sk, fl, drips=[];
+  const upd=v=>{
+    arc.setAttribute('stroke-dasharray',(75*v).toFixed(2)+' 100');
+    pt.setAttribute('transform','rotate('+(-135+270*v).toFixed(1)+' 32 32)');
+    sk.setAttribute('transform','rotate('+((v-0.5)*50).toFixed(1)+' 32 33)');
+    if(fl) fl.setAttribute('d',fluidD(v));
+    dripUpd(drips, v);
+    vl.textContent=fmt(k,v); el.setAttribute('aria-valuenow',v.toFixed(3)); el.setAttribute('aria-valuetext',vl.textContent);
+  };
+  const skin=()=>{ hd.textContent=''; hd.appendChild(SKIN===0?skullDom(big?'big':'small',1000+i):$('tpl-sk'+(SKIN-1)).content.cloneNode(true)); arc=hd.querySelector('.arc'); pt=hd.querySelector('.pt'); sk=hd.querySelector('.sk'); fl=hd.querySelector('.fl'); drips=hd.querySelectorAll('.drip'); upd(state.p[i]); };
+  KNOBS.push(skin); skin(); fad[i]={ upd };
+  const put=v=>{ show(i, Math.max(0,Math.min(1,v))); send('p', i, state.p[i]); if(k==='cx1'||k==='cx2'||k==='cx3') drawEq(); if(k==='etw') drawRc(); };
+  let y0=0, v0=0, on=false, tl=0;
+  el.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    const now=Date.now(); if(now-tl<320){ put(q.d); tl=0; return; } tl=now;
+    on=true; y0=e.clientY; v0=state.p[i]; el.classList.add('grab');
+    try{ el.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  el.addEventListener('pointermove', e=>{ if(on) put(v0+(y0-e.clientY)/(e.shiftKey?650:170)); });
+  const up=()=>{ on=false; el.classList.remove('grab'); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  el.addEventListener('keydown', e=>{
+    const st=e.shiftKey?0.05:0.01; let d=0;
+    if(e.key==='ArrowUp'||e.key==='ArrowRight') d=st; else if(e.key==='ArrowDown'||e.key==='ArrowLeft') d=-st;
+    else if(e.key==='Home'){ e.preventDefault(); put(0); return; } else if(e.key==='End'){ e.preventDefault(); put(1); return; }
+    if(d){ e.preventDefault(); put(state.p[i]+d); }
+  });
+}
+/* fader: native range input (touch-safe) wearing a bone puck */
+function mkFader(i, parent){
+  const q=P[i], k=q.k, lab=document.createElement('label'), nm=document.createElement('span');
+  const r=document.createElement('input'), out=document.createElement('output');
+  lab.className='fd'; nm.textContent=q.n;
+  r.type='range'; r.min=0; r.max=1; r.step=0.005; r.value=state.p[i]; r.setAttribute('aria-label',q.n);
+  lab.setAttribute('data-fam',RESK.indexOf(k)>=0?'res':'blood');
+  const upd=v=>{ r.value=v; r.style.setProperty('--v',(v*100).toFixed(1)+'%'); out.textContent=fmt(k,v); };
+  fad[i]={ upd }; upd(state.p[i]);
+  r.addEventListener('input', ()=>{ show(i, +r.value); send('p', i, state.p[i]); if(k==='etg'||k==='ehm') drawRc(); });
+  lab.append(nm, r, out); parent.appendChild(lab);
+}
+function mkFad(i, parent){ (FADERS.indexOf(P[i].k)>=0?mkFader:mkKnob)(i, parent); }
+function show(i, v){ show0(i, v); if(i===12) paintEdit(); if(AUDI[i]) paintAud(); }
+function show0(i, v){
+  const q=P[i];
+  v=(v===v)?Math.max(q.min, Math.min(q.max, v)):q.d;
+  state.p[i]=v;
+  const k=q.k;
+  if(k==='lvl'){ $('lvl').value=v; $('lvlo').textContent=UNIT.lvl(v); return; }
+  if(k==='aud'||k==='adst') return;   /* painted by paintAud: it knows about GHOST and the stage that is really audible */
+  if(k==='gmt'){ $('bt-gm').classList.toggle('on', v>0.5); $('bt-gm').setAttribute('aria-pressed', v>0.5?'true':'false'); return; }
+  if(k==='byp'){ $('bt-byp').classList.toggle('on', v>0.5); $('bt-byp').setAttribute('aria-pressed', v>0.5?'true':'false'); return; }
+  if(k==='ord'){ const oi=Math.round(v*23); $('v-ord').textContent=ordStr(oi); $('ordtxt').textContent='chain '+ordStr(oi); markDirty(); return; }
+  if(fad[i]) fad[i].upd(v);
+  if(TOGS.indexOf(k)>=0 && BT[k]){ BT[k].classList.toggle('on', v>0.5); BT[k].setAttribute('aria-pressed', v>0.5?'true':'false'); }
+  if(LEDS[k]) LEDS[k].classList.toggle('on', k==='ehm'?v>0.005:v>0.5);
+  markDirty();
+}
+
+/* ── the plates ── */
+function buildSimple(id, keys){
+  const pg=$(id);
+  keys.forEach(k2=>{
+    if(TOGS.indexOf(k2)>=0 && k2!=='byp') mkTog(KI[k2], pg);
+    else mkFad(KI[k2], pg);
+  });
+}
+function hint(id, t){ const d=document.createElement('div'); d.className='sub'; d.textContent=t; $(id).appendChild(d); }
+buildSimple('pg-gate', ['gte','glk']);
+let eqEdit=0; const EDB=[];
+(function editSel(){
+  const pg=$('pg-gate'), row=document.createElement('div'), lab=document.createElement('span');
+  row.className='trow'; row.id='eqsel'; lab.className='sub'; lab.textContent='editing'; row.appendChild(lab);
+  ['L','R'].forEach((nm,i)=>{
+    const b=document.createElement('button'); b.className='tog'; b.textContent=nm; b.setAttribute('aria-label','edit the '+(i?'right':'left')+' channel curve');
+    b.addEventListener('click', ()=>setEdit(i)); row.appendChild(b); EDB.push(b);
+  });
+  pg.appendChild(row);
+})();
+function setEdit(i){ eqEdit=i?1:0; paintEdit(); drawEq(); }
+function paintEdit(){
+  const un=state.p[12]<=0.5;
+  $('eqsel').hidden=!un;
+  EDB.forEach((b,i)=>{ const on=un&&i===eqEdit; b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false'); });
+}
+hint('pg-gate', 'drag a node · tap empty space to add · double-tap a node to remove · unlink to give L and R their own curves · per-bin linear-phase · feeds the detectors');
+(function buildCrypt(){
+  const pg=$('pg-crypt');
+  mkTog(KI['con'], pg);
+  const kr=document.createElement('div'); kr.className='krow';
+  ['cx1','cx2','cx3','cat','crl'].forEach(k2=>mkFad(KI[k2], kr));
+  pg.appendChild(kr);
+  for(let k2=0;k2<4;k2++){
+    const bb=document.createElement('div'); bb.className='bb';
+    mkTog(KI['ce'+k2], bb).textContent='B'+(k2+1);
+    mkFad(KI['ct'+k2], bb); mkFad(KI['cr'+k2], bb);
+    pg.appendChild(bb);
+  }
+})();
+buildSimple('pg-shroud', ['son','thr','rat','atk','rel','tlt','smt','mgr','mix']);
+buildSimple('pg-velvet', ['von','vth','vrt','vsg','vak','vrl','vdp']);
+buildSimple('pg-exh', ['eon','eth','ert','esk','eat','erl','etw','edx','erm','etg']);
+buildSimple('pg-rsr', ['ehn','ehd','eht','ehm']);
+hint('pg-exh', 'pass 2 judges the removed stream · survivors return, weighted by restore');
+
+/* ── level, top buttons, keys ── */
+$('lvl').addEventListener('input', ()=>{ show(0, +$('lvl').value); send('p', 0, state.p[0]); });
+function cycle(k, n, div){
+  const i=KI[k], nxt=(Math.round(state.p[i]*div)+1)%n;
+  show(i, nxt/div); send('p', i, state.p[i]);
+}
+$('bt-byp').addEventListener('click', ()=>{ const v=state.p[9]>0.5?0:1; show(9, v); send('p', 9, state.p[9]); });
+$('bt-gm').addEventListener('click', ()=>{ const v=state.p[50]>0.5?0:1; show(50, v); send('p', 50, state.p[50]); });
+$('bt-aud').addEventListener('click', ()=>cycle('aud', 5, 4));
+$('bt-adst').addEventListener('click', ()=>cycle('adst', 5, 4));
+$('bt-ord').addEventListener('click', ()=>cycle('ord', 24, 23));
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ if(PLOPEN){ e.preventDefault(); plClose(true); } else document.body.classList.remove('dropping'); return; }
+  if(e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t=e.target; if(t && (t.tagName==='SELECT' || t.tagName==='TEXTAREA' || t.isContentEditable || (t.tagName==='INPUT' && t.type!=='range'))) return;
+  const k2=e.key.length===1?e.key.toLowerCase():e.key;
+  if(k2==='k') setSkin(SKIN+1);
+  else if(k2==='b') $('bt-byp').click();
+  else if(k2==='m') $('bt-aud').click();
+  else if(k2==='n') $('bt-adst').click();
+  else if(k2==='o') $('bt-ord').click();
+  else if(k2==='g') $('bt-gm').click();
+  else if(k2==='[') setPreset(META[SLOT].pre-1);
+  else if(k2===']') setPreset(META[SLOT].pre+1);
+  else if(k2==='c') abToggle();
+});
+
+/* ── the catacomb display: smoke in bone luminance (-120..0 dB), removal in blood; canvases are fitted to their box at device resolution ── */
+const disp=$('disp'), dctx=disp.getContext('2d');
+const DPR=()=>window.devicePixelRatio||1;
+const SZ=new WeakMap(); let ROQ=0;
+const RO=(typeof ResizeObserver==='function')?new ResizeObserver(es=>{
+  es.forEach(en=>{ const b=en.contentRect; SZ.set(en.target,[b.width,b.height]); });
+  if(!ROQ) ROQ=requestAnimationFrame(()=>{ ROQ=0; fitDisp(); drawEq(); drawRc(); drawHc(); });
+}):null;
+function csz(c, w0, h0){
+  if(!RO) return [c.clientWidth||w0, c.clientHeight||h0];
+  let s=SZ.get(c);
+  if(!s){ s=[c.clientWidth, c.clientHeight]; SZ.set(c, s); RO.observe(c); }
+  return [s[0]||w0, s[1]||h0];
+}
+const GRY=[]; for(let i=0;i<32;i++){ const t=i/31; GRY.push('rgb('+Math.round(5+228*t)+','+Math.round(5+223*t)+','+Math.round(8+206*t)+')'); }
+function fitDisp(){
+  const d=DPR(), s=csz(disp,560,128), w=Math.round(s[0]*d), h=Math.round(s[1]*d);
+  if(disp.width!==w||disp.height!==h){ disp.width=w; disp.height=h; dctx.fillStyle='#050508'; dctx.fillRect(0,0,w,h); }
+}
+fitDisp();
+let ROWB=[];
+const MBK=256/Math.log(1000);
+const mbi=f=>{ const b=Math.floor(Math.log(f/20)*MBK); return b<0?0:(b>255?255:b); };
+function buildRows(){ ROWB=[]; for(let r=0;r<64;r++) ROWB.push([4*r,4*r+1,4*r+2,4*r+3]); }
+function resRGB(t){
+  const c0=[57,255,208], c1=[138,107,255], c2=[255,107,214], a=t<0.5?c0:c1, b=t<0.5?c1:c2, u=t<0.5?t*2:(t-0.5)*2;
+  return [Math.round(a[0]+(b[0]-a[0])*u), Math.round(a[1]+(b[1]-a[1])*u), Math.round(a[2]+(b[2]-a[2])*u)];
+}
+const RESC=[]; for(let r=0;r<64;r++) RESC.push(resRGB(r/63));
+function smoke(mb){
+  fitDisp();
+  const W=disp.width, Hh=disp.height, cw=Math.max(2,Math.round(DPR())), rh=Hh/64;
+  dctx.drawImage(disp,-cw,0);
+  dctx.fillStyle='#050508'; dctx.fillRect(W-cw,0,cw,Hh);
+  for(let r=0;r<64;r++){
+    const bands=ROWB[r];
+    let db=-160, gr=0, rc=0;
+    for(let k2=0;k2<bands.length;k2++){ const bi=bands[k2]; if(mb[bi]>db) db=mb[bi]; if(mb[256+bi]>gr) gr=mb[256+bi]; if(mb[522+bi]>rc) rc=mb[522+bi]; }
+    let ci=((db+120)/120*31)|0; if(ci<0) ci=0; else if(ci>31) ci=31;
+    const y0=Math.round((63-r)*rh), hh=Math.round((64-r)*rh)-y0;
+    dctx.fillStyle=GRY[ci]; dctx.fillRect(W-cw, y0, cw, hh);
+    if(gr>0.25){
+      /* blood soaks in: the harder a band is cut, the deeper and more opaque the stain, and it bleeds into the rows beside it */
+      const a=1-Math.exp(-gr/5);
+      dctx.fillStyle='rgba('+Math.round(110+116*a)+','+Math.round(10+14*a)+','+Math.round(30+30*a)+','+(0.3+0.7*a).toFixed(3)+')';
+      dctx.fillRect(W-cw, y0, cw, hh);
+      if(gr>2){ dctx.fillStyle='rgba(194,24,59,'+(0.22*a).toFixed(3)+')'; dctx.fillRect(W-cw, y0-hh, cw, hh); dctx.fillRect(W-cw, y0+hh, cw, hh); }
+    }
+    if(rc>0.25){
+      /* what the resurrection pass gives back: the antidote hue, by frequency */
+      const c=RESC[r], a=Math.min(1,rc/9);
+      dctx.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+','+(0.25+0.6*a).toFixed(3)+')';
+      dctx.fillRect(W-cw, y0, cw, hh);
+    }
+  }
+}
+
+/* ── the gate strip: curve editor + crypt crossover lines (redrawn only when something changed) ── */
+const eqc=$('eqc'), ectx=eqc.getContext('2d');
+function fitEq(){
+  const d=DPR(), s=csz(eqc,560,64), w=Math.round(s[0]*d), h=Math.round(s[1]*d);
+  if(eqc.width!==w||eqc.height!==h){ eqc.width=w; eqc.height=h; }
+}
+const FX0=Math.log2(20), FX1=Math.log2(20000), FY=18;
+const ZN=[[20,60,'sub'],[60,250,'bass'],[250,1500,'low mid'],[1500,3500,'up mid'],[3500,6000,'pres'],[6000,20000,'brilliance']];
+const fToX=f=>(Math.log2(f)-FX0)/(FX1-FX0)*eqc.width;
+const gToY=g=>eqc.height/2-(g/FY)*(eqc.height/2-5);
+const xToF=x=>Math.pow(2, FX0+x/eqc.width*(FX1-FX0));
+const yToG=y=>(eqc.height/2-y)/(eqc.height/2-5)*FY;
+function curveAt(arr, f){
+  if(!arr.length) return 0;
+  if(f<=arr[0][0]) return arr[0][1];
+  if(f>=arr[arr.length-1][0]) return arr[arr.length-1][1];
+  for(let i=0;i<arr.length-1;i++){
+    if(f>=arr[i][0]&&f<=arr[i+1][0]){
+      const t=(Math.log2(f)-Math.log2(arr[i][0]))/(Math.log2(arr[i+1][0])-Math.log2(arr[i][0]));
+      return arr[i][1]+(arr[i+1][1]-arr[i][1])*t;
+    }
+  }
+  return 0;
+}
+/* the crossover edges as the worklet uses them: sorted, snapped to FFT bins */
+function xoEdges(){
+  let a=40*Math.pow(20,state.p[14]), b=200*Math.pow(16,state.p[15]), c=800*Math.pow(15,state.p[16]), t;
+  if(b<a){ t=a; a=b; b=t; } if(c<b){ t=b; b=c; c=t; } if(b<a){ t=a; a=b; b=t; }
+  const bh=srNow/2048;
+  return [a,b,c].map(f=>Math.max(20, Math.min(20000, Math.round(f/bh)*bh)));
+}
+let dragging=false, dragCh=-1, dragPt=null, eqTap=0, eqTapCh=-1, eqTapI=-1;
+function drawEq(){
+  fitEq();
+  const W=eqc.width, H=eqc.height, D=DPR();
+  ectx.fillStyle='#050508'; ectx.fillRect(0,0,W,H);
+  ectx.font=(8*D)+'px ui-monospace,Menlo,Consolas,monospace';
+  ZN.forEach((z,i)=>{
+    const x0=Math.round(fToX(z[0])), x1=Math.round(fToX(z[1]));
+    if(i%2===0){ ectx.fillStyle='rgba(233,228,214,.035)'; ectx.fillRect(x0,0,x1-x0,H); }
+    ectx.fillStyle='rgba(233,228,214,.34)'; ectx.fillText(z[2], x0+3*D, 10*D);
+  });
+  ectx.lineWidth=D; ectx.strokeStyle='#26262e';
+  [100,1000,10000].forEach(f=>{ const x=Math.round(fToX(f))+.5; ectx.beginPath(); ectx.moveTo(x,0); ectx.lineTo(x,H); ectx.stroke(); });
+  ectx.strokeStyle='#1c1c23';
+  [-12,-6,6,12].forEach(g=>{ const y=Math.round(gToY(g))+.5; ectx.beginPath(); ectx.moveTo(0,y); ectx.lineTo(W,y); ectx.stroke(); });
+  ectx.strokeStyle='#8e8e96';
+  ectx.beginPath(); ectx.moveTo(0,Math.round(gToY(0))+.5); ectx.lineTo(W,Math.round(gToY(0))+.5); ectx.stroke();
+  ectx.font=(9*D)+'px ui-monospace,Menlo,Consolas,monospace'; ectx.fillStyle='rgba(233,228,214,.42)';
+  [[100,'100'],[1000,'1k'],[10000,'10k']].forEach(a=>{ ectx.fillText(a[1], fToX(a[0])+3*D, H-4*D); });
+  [[12,'+12'],[6,'+6'],[0,'0'],[-6,'-6'],[-12,'-12']].forEach(a=>{ ectx.fillText(a[1], 3*D, gToY(a[0])-2*D); });
+  ectx.strokeStyle='#8e8e96';
+  const cOn=state.p[13]>0.5;
+  xoEdges().forEach(f=>{
+    const x=Math.round(fToX(f))+.5;
+    ectx.globalAlpha=cOn?1:0.35; ectx.setLineDash([2*D,3*D]);
+    ectx.beginPath(); ectx.moveTo(x,0); ectx.lineTo(x,H); ectx.stroke();
+    ectx.setLineDash([]); ectx.globalAlpha=1;
+  });
+  const gateOn=state.p[11]>0.5, link=state.p[12]>0.5, alpha=gateOn?0.95:0.35;
+  function path(arr, stroke, dash, mul){
+    ectx.beginPath();
+    for(let x=0;x<W;x+=2){
+      const y=gToY(Math.max(-FY,Math.min(FY,curveAt(arr, xToF(x)))));
+      if(x===0) ectx.moveTo(x,y); else ectx.lineTo(x,y);
+    }
+    ectx.strokeStyle=stroke; ectx.lineWidth=1.5*D; ectx.globalAlpha=alpha*(mul||1); ectx.setLineDash(dash||[]);
+    ectx.stroke(); ectx.setLineDash([]); ectx.globalAlpha=1; ectx.lineWidth=D;
+  }
+  function nodes(arr, col, mul){
+    for(let i=0;i<arr.length;i++){
+      ectx.beginPath(); ectx.arc(fToX(arr[i][0]), gToY(arr[i][1]), 4.5*D, 0, 6.283185307179586);
+      ectx.fillStyle=col; ectx.globalAlpha=alpha*(mul||1); ectx.fill(); ectx.globalAlpha=1;
+    }
+  }
+  const act=link?0:eqEdit;
+  path(eqL, '#e9e4d6', null, act===0?1:0.4); if(!link) path(eqR, '#8e8e96', [3*D,3*D], act===1?1:0.4);
+  nodes(eqL, dragging&&dragCh===0?'#fff6dc':'#e9e4d6', act===0?1:0.4);
+  if(!link) nodes(eqR, dragging&&dragCh===1?'#fff6dc':'#8e8e96', act===1?1:0.4);
+}
+function eqPos(e){
+  const r=eqc.getBoundingClientRect();
+  return [ (e.clientX-r.left)*(eqc.width/r.width), (e.clientY-r.top)*(eqc.height/r.height) ];
+}
+function nearest(arr, x, y){
+  let best=-1, bd=Math.pow(20*DPR(),2);
+  for(let i=0;i<arr.length;i++){
+    const dx=fToX(arr[i][0])-x, dy=gToY(arr[i][1])-y, d=dx*dx+dy*dy;
+    if(d<bd){ bd=d; best=i; }
+  }
+  return best;
+}
+function sendEq(){
+  markDirty();
+  const mk=(ch, arr)=>{
+    const m2=['eq', ch, arr.length];
+    for(let i=0;i<arr.length;i++) m2.push(arr[i][0], arr[i][1]);
+    return m2;
+  };
+  send(...mk(0, eqL));
+  if(state.p[12]<=0.5) send(...mk(1, eqR));
+}
+function dist2(arr, i, x, y){ const dx=fToX(arr[i][0])-x, dy=gToY(arr[i][1])-y; return dx*dx+dy*dy; }
+eqc.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  const pp=eqPos(e), x=pp[0], y=pp[1], link=state.p[12]>0.5;
+  /* unlinked: the selected channel is the one edited (new nodes land there, coincident nodes resolve to it); a node of the other channel is taken only where the selected one has none in reach, and the selection follows */
+  let ch=link?0:eqEdit, i=nearest(ch===0?eqL:eqR, x, y);
+  if(!link && i<0){ const o=1-ch, j=nearest(o===0?eqL:eqR, x, y); if(j>=0){ ch=o; i=j; eqEdit=o; paintEdit(); } }
+  if(i<0){
+    if((ch===0?eqL:eqR).length>=32) return;
+    const f=Math.max(20, Math.min(20000, xToF(x))), g=Math.max(-FY, Math.min(FY, yToG(y)));
+    const arr=ch===0?eqL:eqR;
+    arr.push([f,g]); arr.sort((a,b2)=>a[0]-b2[0]);
+    dragCh=ch; dragPt=arr[arr.findIndex(q2=>q2[0]===f&&q2[1]===g)];
+    if(link) eqR=eqL.map(a=>[a[0],a[1]]);
+    eqTap=Date.now(); eqTapCh=ch; eqTapI=arr.indexOf(dragPt);
+  }
+  else{
+    const now=Date.now(), arr=ch===0?eqL:eqR;
+    if(now-eqTap<320 && eqTapCh===ch && eqTapI===i){
+      /* double-tap on a node removes it (mouse, touch and stylus alike) */
+      eqTap=0;
+      if(arr.length>1) arr.splice(i,1);
+      if(link) eqR=eqL.map(a=>[a[0],a[1]]);
+      sendEq(); drawEq(); return;
+    }
+    eqTap=now; eqTapCh=ch; eqTapI=i;
+    dragCh=ch; dragPt=arr[i];
+  }
+  dragging=true;
+  try{ eqc.setPointerCapture(e.pointerId); }catch(_){}
+  sendEq(); drawEq();
+});
+eqc.addEventListener('pointermove', e=>{
+  if(!dragging||!dragPt) return;
+  const pp=eqPos(e);
+  dragPt[0]=Math.max(20, Math.min(20000, xToF(pp[0])));
+  dragPt[1]=Math.max(-FY, Math.min(FY, yToG(pp[1])));
+  (dragCh===0?eqL:eqR).sort((a,b2)=>a[0]-b2[0]);
+  if(dragCh===0&&state.p[12]>0.5) eqR=eqL.map(a=>[a[0],a[1]]);
+  sendEq(); drawEq();
+});
+eqc.addEventListener('pointerup', ()=>{ dragging=false; dragPt=null; sendEq(); drawEq(); });
+eqc.addEventListener('pointercancel', ()=>{ dragging=false; dragPt=null; drawEq(); });
+
+/* ── the resurrection strip: what was removed (blood), what returns (antidote), and where you aim the restore ── */
+const rcc=$('rcc'), rctx=rcc.getContext('2d');
+let TGT=[], LASTMB=null, rcDrag=-1, rcTap=0, rcTapI=-1;
+function fitRc(){
+  const d=DPR(), s=csz(rcc,560,120), w=Math.round(s[0]*d), h=Math.round(s[1]*d);
+  if(rcc.width!==w||rcc.height!==h){ rcc.width=w; rcc.height=h; }
+}
+const rcX=f=>(Math.log2(f)-FX0)/(FX1-FX0)*rcc.width;
+const rcF=x=>Math.pow(2, FX0+x/rcc.width*(FX1-FX0));
+const rcY=w=>rcc.height-4*DPR()-w*(rcc.height-8*DPR());
+const rcW=y=>Math.max(0,Math.min(1,(rcc.height-4*DPR()-y)/(rcc.height-8*DPR())));
+/* the very focus weight the engine multiplies: a bell around each aimed target (the harmonics are found live by the engine and drawn on the Resurrect page) */
+function tgW(f){
+  const sg=(0.15+1.35*state.p[54])/2.355;
+  let m=0;
+  for(let i=0;i<TGT.length;i++){ const z=Math.log2(f/TGT[i][0])/sg, v=TGT[i][1]*Math.exp(-0.5*z*z); if(v>m) m=v; }
+  return m>1?1:m;
+}
+function sendTg(){ markDirty(); const m2=['tg', TGT.length]; TGT.forEach(t=>m2.push(t[0], t[1], t[2]|0, t[3]|0)); send(...m2); }
+function drawRc(){
+  fitRc();
+  const W=rcc.width, H=rcc.height, D=DPR(), top=4*D, bot=H-4*D, span=bot-top;
+  rctx.fillStyle='#050508'; rctx.fillRect(0,0,W,H);
+  rctx.lineWidth=D; rctx.strokeStyle='#1c1c23';
+  [100,1000,10000].forEach(f=>{ const x=Math.round(rcX(f))+.5; rctx.beginPath(); rctx.moveTo(x,0); rctx.lineTo(x,H); rctx.stroke(); });
+  const mb=LASTMB, st=Math.max(1,Math.round(D));
+  if(mb){
+    for(let x=0;x<W;x+=st){
+      const f=rcF(x+st/2), bi=mbi(f), rc=mb[522+bi], p1=mb[256+bi]+rc;
+      if(p1>0.25){ const h1=Math.min(1,p1/24)*span; rctx.fillStyle='rgba(194,24,59,.78)'; rctx.fillRect(x,bot-h1,st,h1); }
+      if(rc>0.25){ const h2=Math.min(1,rc/24)*span, c=RESC[Math.min(63,Math.max(0,Math.floor(Math.log2(f/20)/Math.log2(1000)*64)))]; rctx.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',.85)'; rctx.fillRect(x,bot-h2,st,h2); }
+    }
+  }
+  rctx.globalAlpha=state.p[52]>0.5?1:0.4;
+  rctx.beginPath(); rctx.moveTo(0,bot);
+  for(let x=0;x<=W;x+=2) rctx.lineTo(x, rcY(tgW(rcF(Math.max(x,0.5)))));
+  rctx.lineTo(W,bot); rctx.closePath(); rctx.fillStyle='rgba(124,245,220,.14)'; rctx.fill();
+  rctx.beginPath();
+  for(let x=0;x<=W;x+=2){ const y=rcY(tgW(rcF(Math.max(x,0.5)))); if(x===0) rctx.moveTo(x,y); else rctx.lineTo(x,y); }
+  rctx.strokeStyle='#7cf5dc'; rctx.lineWidth=1.5*D; rctx.stroke(); rctx.lineWidth=D;
+  TGT.forEach(t=>{ rctx.beginPath(); rctx.arc(rcX(t[0]), rcY(t[1]), 5*D, 0, 6.283185307179586); rctx.fillStyle='#fff6dc'; rctx.fill(); rctx.strokeStyle='#7cf5dc'; rctx.lineWidth=1.5*D; rctx.stroke(); rctx.lineWidth=D; });
+  rctx.globalAlpha=1;
+  rctx.font=(9*D)+'px ui-monospace,Menlo,Consolas,monospace'; rctx.fillStyle='rgba(233,228,214,.42)';
+  [[100,'100'],[1000,'1k'],[10000,'10k']].forEach(a=>{ rctx.fillText(a[1], rcX(a[0])+3*D, H-5*D); });
+  if(!TGT.length) rctx.fillText('tap to aim a restore', 8*D, 14*D);
+}
+function rcPos(e){ const r=rcc.getBoundingClientRect(); return [ (e.clientX-r.left)*(rcc.width/r.width), (e.clientY-r.top)*(rcc.height/r.height) ]; }
+function rcNear(x,y){
+  let best=-1, bd=Math.pow(20*DPR(),2);
+  for(let i=0;i<TGT.length;i++){ const dx=rcX(TGT[i][0])-x, dy=rcY(TGT[i][1])-y, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=i; } }
+  return best;
+}
+rcc.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  const pp=rcPos(e); let i=rcNear(pp[0],pp[1]);
+  if(i<0){
+    if(TGT.length>=8) return;
+    TGT.push([Math.max(20,Math.min(20000,rcF(pp[0]))), Math.max(0.1,rcW(pp[1])), 0, 0]);
+    i=TGT.length-1; rcTap=Date.now(); rcTapI=i;
+    if(state.p[52]<0.5){ show(52,1); send('p',52,1); }
+  }
+  else{
+    const now=Date.now();
+    if(now-rcTap<320 && rcTapI===i){ TGT.splice(i,1); rcTap=0; sendTg(); drawRc(); return; }
+    rcTap=now; rcTapI=i;
+  }
+  rcDrag=i;
+  try{ rcc.setPointerCapture(e.pointerId); }catch(_){}
+  sendTg(); drawRc();
+});
+rcc.addEventListener('pointermove', e=>{
+  if(rcDrag<0||!TGT[rcDrag]) return;
+  const pp=rcPos(e);
+  TGT[rcDrag][0]=Math.max(20,Math.min(20000,rcF(pp[0]))); TGT[rcDrag][1]=rcW(pp[1]);
+  sendTg(); drawRc();
+});
+rcc.addEventListener('pointerup', ()=>{ rcDrag=-1; sendTg(); drawRc(); });
+rcc.addEventListener('pointercancel', ()=>{ rcDrag=-1; drawRc(); });
+
+/* ── the resurrect view: the spectrum, the fundamentals the engine found inside your aims, and the harmonic comb it is restoring ── */
+const hcc=$('hcc'), hctx=hcc.getContext('2d');
+function fitHc(){
+  const d=DPR(), s=csz(hcc,560,120), w=Math.round(s[0]*d), h=Math.round(s[1]*d);
+  if(hcc.width!==w||hcc.height!==h){ hcc.width=w; hcc.height=h; }
+}
+const hcX=f=>(Math.log2(f)-FX0)/(FX1-FX0)*hcc.width;
+const hcF=x=>Math.pow(2, FX0+x/hcc.width*(FX1-FX0));
+function drawHc(){
+  fitHc();
+  const W=hcc.width, H=hcc.height, D=DPR(), top=10*D, bot=H-4*D, span=bot-top, mb=LASTMB, st0=Math.max(1,Math.round(D));
+  hctx.fillStyle='#050508'; hctx.fillRect(0,0,W,H);
+  hctx.lineWidth=D; hctx.strokeStyle='#1c1c23';
+  [100,1000,10000].forEach(f=>{ const x=Math.round(hcX(f))+.5; hctx.beginPath(); hctx.moveTo(x,0); hctx.lineTo(x,H); hctx.stroke(); });
+  const fund=[]; let n=0, nh=0, np=0, nv=0;
+  if(mb){
+    for(let x=0;x<W;x+=st0){
+      const f=hcF(x+st0/2), bi=mbi(f), db=mb[bi], gr=mb[256+bi], rc=mb[522+bi];
+      const hI=Math.max(0,Math.min(1,(db+100)/100))*span*0.85;
+      hctx.fillStyle='rgba(233,228,214,.2)'; hctx.fillRect(x,bot-hI,st0,hI);
+      if(gr>0.25){ const h1=Math.min(1,(gr+rc)/24)*span; hctx.fillStyle='rgba(194,24,59,.55)'; hctx.fillRect(x,bot-h1,st0,h1); }
+      if(rc>0.25){ const c=RESC[Math.min(63,Math.max(0,Math.floor(Math.log2(f/20)/Math.log2(1000)*64)))], h2=Math.min(1,rc/24)*span; hctx.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',.8)'; hctx.fillRect(x,bot-h2,st0,h2); }
+    }
+    n=Math.min(96,mb[778]|0);
+    for(let j=0;j<n;j++){
+      const f=mb[779+5*j], a=mb[780+5*j], k=mb[781+5*j], ti=mb[782+5*j]|0, st=mb[783+5*j]|0;
+      const x=Math.round(hcX(f))+.5, c=RESC[Math.min(63,Math.max(0,Math.floor(Math.log2(f/20)/Math.log2(1000)*64)))], col='rgb('+c[0]+','+c[1]+','+c[2]+')';
+      if(st===1) np++; else if(st===2) nv++;
+      if(k===1){
+        const aim=TGT[ti]?TGT[ti][0]:f;
+        fund.push(Math.round(f)+(Math.abs(Math.log2(f/aim))>0.2?' (aim '+Math.round(aim)+')':''));
+        hctx.strokeStyle=st===2?'rgba(194,24,59,.7)':'#fff6dc'; hctx.lineWidth=D; hctx.setLineDash([3*D,3*D]); hctx.beginPath(); hctx.moveTo(x,top); hctx.lineTo(x,bot); hctx.stroke(); hctx.setLineDash([]);
+        hctx.beginPath(); hctx.moveTo(x,top-6*D); hctx.lineTo(x+5*D,top); hctx.lineTo(x,top+6*D); hctx.lineTo(x-5*D,top); hctx.closePath();
+        if(st===2){ hctx.strokeStyle='rgba(194,24,59,.9)'; hctx.lineWidth=1.5*D; hctx.stroke(); } else { hctx.fillStyle='#fff6dc'; hctx.fill(); if(st===1){ hctx.strokeStyle=col; hctx.lineWidth=2*D; hctx.stroke(); } }
+        hctx.lineWidth=D;
+      }
+      else{
+        if(st!==2) nh++;
+        const h=Math.max(0.15,Math.min(1,a))*span;
+        if(st===2){
+          hctx.strokeStyle='rgba(194,24,59,.6)'; hctx.lineWidth=1.5*D; hctx.setLineDash([2*D,3*D]); hctx.beginPath(); hctx.moveTo(x,bot); hctx.lineTo(x,bot-h); hctx.stroke(); hctx.setLineDash([]);
+          const y=bot-h; hctx.lineWidth=1.5*D; hctx.beginPath(); hctx.moveTo(x-3*D,y-3*D); hctx.lineTo(x+3*D,y+3*D); hctx.moveTo(x+3*D,y-3*D); hctx.lineTo(x-3*D,y+3*D); hctx.stroke();
+        }
+        else{
+          hctx.strokeStyle=col; hctx.lineWidth=(st===1?3:2)*D; hctx.beginPath(); hctx.moveTo(x,bot); hctx.lineTo(x,bot-h); hctx.stroke();
+          hctx.beginPath(); hctx.arc(x,bot-h,(st===1?4:2.5)*D,0,6.283185307179586); hctx.fillStyle=st===1?'#fff6dc':col; hctx.fill();
+          if(st===1){ hctx.strokeStyle=col; hctx.lineWidth=1.5*D; hctx.stroke(); }
+        }
+        hctx.lineWidth=D;
+      }
+    }
+  }
+  hctx.font=(9*D)+'px ui-monospace,Menlo,Consolas,monospace'; hctx.fillStyle='rgba(233,228,214,.42)';
+  [[100,'100'],[1000,'1k'],[10000,'10k']].forEach(a=>{ hctx.fillText(a[1], hcX(a[0])+3*D, H-5*D); });
+  $('hcinfo').textContent=!mb?'power on · resurrect reads the live spectrum':(n?('fundamentals '+fund.join(' · ')+' hz · '+nh+' harmonics restored'+(np?' · '+np+' pinned':'')+(nv?' · '+nv+' vetoed':'')):(TGT.length?'listening for a fundamental inside your aim · raise resurrect':'aim a focus on the exhume page · resurrect then finds its harmonics'));
+}
+/* tap a candidate the engine measured: auto -> pinned (always restore) -> vetoed (never) -> auto. Nothing can be drawn freehand. */
+hcc.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  const mb=LASTMB; if(!mb) return;
+  const r=hcc.getBoundingClientRect(), x=(e.clientX-r.left)*(hcc.width/r.width), n=Math.min(96,mb[778]|0);
+  let best=-1, bd=Math.pow(18*DPR(),2);
+  for(let j=0;j<n;j++){ const dx=hcX(mb[779+5*j])-x, d=dx*dx; if(d<bd){ bd=d; best=j; } }
+  if(best<0) return;
+  const k=mb[781+5*best]|0, t=TGT[mb[782+5*best]|0];
+  if(!t||k<1||k>12) return;
+  const bit=1<<(k-1), pinned=(t[2]&bit)!==0, vetoed=(t[3]&bit)!==0;
+  if(!pinned&&!vetoed) t[2]|=bit; else if(pinned){ t[2]&=~bit; t[3]|=bit; } else t[3]&=~bit;
+  sendTg(); drawHc();
+});
+
+/* ── the ledger and the meter ── */
+function segDraw(c, fr, n, col){
+  const dpr=window.devicePixelRatio||1, w=Math.max(8,Math.round((c.clientWidth||160)*dpr)), h=Math.max(4,Math.round((c.clientHeight||10)*dpr));
+  const lit=Math.round(Math.max(0,Math.min(1,fr))*n), key=lit+''+col;
+  if(c._lit===key && c.width===w) return;
+  c._lit=key; if(c.width!==w) c.width=w; if(c.height!==h) c.height=h;
+  const g=c.getContext('2d'), gap=Math.max(1,Math.round(dpr)), sw=(w-gap*(n-1))/n;
+  g.fillStyle='#0b0b0f'; g.fillRect(0,0,w,h);
+  for(let i=0;i<n;i++){
+    let f='#1c1c23';
+    if(i<lit){ if(col==='res'){ const r=resRGB(i/(n>1?n-1:1)); f='rgb('+r[0]+','+r[1]+','+r[2]+')'; } else f=col?'rgb(194,24,59)':'#e9e4d6'; }
+    g.fillStyle=f; g.fillRect(Math.round(i*(sw+gap)),0,Math.max(1,Math.round(sw)),h);
+  }
+}
+function ledPaint(mb){
+  for(let k2=0;k2<7;k2++){
+    const v=mb[512+k2], on=v>-150;
+    $('ld-'+k2).textContent=on?v.toFixed(1):'—';
+    segDraw($('sg-'+k2), on?(v+60)/60:0, 20, k2===4?'res':true);
+  }
+  $('simtxt').textContent=mb[519]>0.5?'simulation — main untouched':'';
+}
+function wmsg(m){
+  if(m&&m[0]==='r'){ if(m[1]&&m[1].length) printChunk(m[1]); return; }
+  if(m&&m[0]==='rend'){ printEnd(); return; }
+  if(!m||m.length!==2||m[0]!=='m'||!m[1]||m[1].length!==1259) return;
+  const mb=m[1];
+  LASTMB=mb; ERRN=mb[521]|0;
+  smoke(mb);
+  let g=0; for(let i=256;i<512;i++) if(mb[i]>g) g=mb[i];
+  grNow=g;
+  segDraw($('sg-gr'), g/24, 24, true);
+  if(++ledCnt>=4){ ledCnt=0; ledPaint(mb); $('grv').textContent=g>0.05?'-'+g.toFixed(1)+' dB':'—'; if(state.p[IGM]>0.5 && audEff()[0]===0){ const gd=mb[520]; $('v-gm').textContent=(gd>=0?'+':'')+gd.toFixed(1)+' dB'; } liveTxt(); }
+  if(TAB===4) drawRc();
+  if(TAB===5) drawHc();
+}
+/* the audition the engine really runs: GHOST (a v1 parameter, set by a host) forces REMOVED of the shroud, whatever AUDITION says */
+const IGH=KI.gh, IAU=KI.aud, IAD=KI.adst, IGM=KI.gmt, STAGE_ON=[KI.gte,KI.con,KI.son,KI.von];   /* AUDIT 1..4 = gate, crypt, shroud, velvet */
+const AUDI=[]; [IGH,IAU,IAD,IGM].concat(STAGE_ON).forEach(i=>{ AUDI[i]=1; });
+function audEff(){ return state.p[IGH]>0.5 ? [1,3] : [Math.round(state.p[IAU]*4), Math.round(state.p[IAD]*4)]; }
+/* AUDIT picks which stage's removal the REMOVED / PREPARED auditions listen to; the other three auditions ignore it */
+function auditApplies(){ const au=audEff()[0]; return au===1||au===4; }
+function auditOff(){ const e=audEff(); return e[1]>0 && auditApplies() && state.p[STAGE_ON[e[1]-1]]<=0.5; }
+function paintAud(){
+  const e=audEff(), au=e[0], gh=state.p[IGH]>0.5, ap=auditApplies();
+  $('v-aud').textContent=gh?'GHOST':AUDL[au];
+  $('v-adst').textContent=ADSTL[e[1]];
+  $('bt-adst').classList.toggle('dim', !ap);
+  $('bt-adst').title=ap?'which stage the removed-stream audition listens to':'AUDIT only applies to the REMOVED and PREPARED auditions';
+  $('simtxt').textContent=au===4?'simulation — main untouched':'';
+  if(state.p[IGM]<=0.5) $('v-gm').textContent='UNMATCHED'; else if(au!==0) $('v-gm').textContent='ARMED';
+  liveTxt();
+}
+function latTxt(){ return ((2048+(ENG==='sp'?SPBUF:0))/srNow*1000).toFixed(1)+' ms'; }
+function liveTxt(){
+  if(!powered) return;
+  if(Date.now()<HOLD_U){ stat(HOLD_T,true); return; }
+  if(ctx && ctx.state!=='running'){ stat('audio paused · tap anywhere to resume', true); return; }
+  const e=audEff(), off=auditOff();
+  stat('live · '+(srNow/1000).toFixed(1)+' khz · lat '+latTxt()+' · aud '+(state.p[IGH]>0.5?'ghost':AUDL[e[0]].toLowerCase())+(off?' · '+ADSTL[e[1]].toLowerCase()+' is off':'')+' · max gr -'+grNow.toFixed(1)+' db'+(ERRN?' · frame errors '+ERRN:'')+(ENG==='sp'?' · main-thread engine':''), off||ERRN>0);
+}
+
+/* ── PRINT: the audition stream (before level) as a 32-bit float wav; standalone only ── */
+let REC=null, printMsg='', printWd=0, RND=null;
+function wavBytes(chunks, sr){
+  let n=0; chunks.forEach(c=>{ n+=c.length; });
+  const buf=new ArrayBuffer(56+n*4), dv=new DataView(buf);
+  const w4=(o,t)=>{ for(let i=0;i<4;i++) dv.setUint8(o+i,t.charCodeAt(i)); };
+  w4(0,'RIFF'); dv.setUint32(4,buf.byteLength-8,true); w4(8,'WAVE');
+  w4(12,'fmt '); dv.setUint32(16,16,true); dv.setUint16(20,3,true); dv.setUint16(22,2,true);
+  dv.setUint32(24,sr,true); dv.setUint32(28,sr*8,true); dv.setUint16(32,8,true); dv.setUint16(34,32,true);
+  w4(36,'fact'); dv.setUint32(40,4,true); dv.setUint32(44,n/2,true);
+  w4(48,'data'); dv.setUint32(52,n*4,true);
+  let o=56;
+  chunks.forEach(c=>{ for(let i=0;i<c.length;i++,o+=4) dv.setFloat32(o,c[i],true); });
+  return buf;
+}
+function printPaint(){
+  const b=$('bt-print');
+  b.classList.toggle('on', !!REC); b.textContent=REC?'STOP':'PRINT';
+  $('printtxt').textContent=REC?('rec '+(REC.frames/srNow).toFixed(1)+' s · peak '+(REC.peak>0?(20*Math.log10(REC.peak)).toFixed(1):'-inf')+' db'+(REC.stopping?' · finishing':'')):(RND?rndTxt():(printMsg||'idle'));
+}
+/* what is being printed, as the engine really runs it: ghost, the audition, and the audit stage only where it applies */
+function printTag(){ const e=audEff(); return (state.p[IGH]>0.5?'ghost':AUDL[e[0]].toLowerCase())+(e[1]>0&&auditApplies()?'-'+ADSTL[e[1]].toLowerCase():''); }
+function printToggle(){
+  if(HOSTED||!powered) return;
+  if(!REC){ REC={ chunks:[], frames:0, peak:0, stopping:false, tag:printTag() }; printMsg=''; send('print',1); printPaint(); }
+  else printStop();
+}
+/* stop asks the engine to flush its tail and answer 'rend'; if the answer never comes (engine gone) save what arrived */
+function printStop(){
+  if(!REC) return;
+  if(!REC.stopping){ REC.stopping=true; send('print',0); }
+  clearTimeout(printWd); printWd=setTimeout(()=>{ if(REC) printEnd(); }, 1200);
+  printPaint();
+}
+function printChunk(a){
+  if(!REC) return;
+  REC.chunks.push(a); REC.frames+=a.length/2;
+  for(let i=0;i<a.length;i++){ const v=a[i]<0?-a[i]:a[i]; if(v>REC.peak) REC.peak=v; }
+  if(REC.frames>=srNow*90 && !REC.stopping) printStop();
+  if((REC.chunks.length&7)===0) printPaint();
+}
+function saveBytes(buf, name){
+  const url=URL.createObjectURL(new Blob([buf],{type:'audio/wav'})), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+}
+function printEnd(){
+  clearTimeout(printWd);
+  const r=REC; REC=null;
+  if(r && r.frames>0){
+    const d=new Date(), z=n=>(n<10?'0':'')+n, tag=r.tag===printTag()?r.tag:r.tag+'-mixed';   /* the audition was changed during the take */
+    const name='ossuary-'+tag+'-'+d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes())+z(d.getSeconds())+'.wav';
+    try{ saveBytes(wavBytes(r.chunks, srNow), name); printMsg='saved '+name+' · '+(r.frames/srNow).toFixed(1)+' s'; }
+    catch(err){ printMsg='save failed: '+String(err&&err.message||err); }
+  } else printMsg='nothing printed';
+  printPaint();
+}
+
+/* ── RENDER: the loaded file through the very same engine, offline ──
+   The engine class is WORKLET_SRC, untouched. A worker (or, where a worker will not start or #sp is set, the page itself) drives it block by block in
+   plain JS: faster than real time, at the file's own sample rate, every setting applied before the first sample. The engine's own delay (2048 samples)
+   is taken out, so the file that comes back is the same length as the source and lines up with it sample for sample. What is written is what PRINT
+   writes (the audition stream before level, 32-bit float); the source's BWF bext and iXML chunks ride along. Mono, stereo, 2.1, quad, 4.1, 5.1 and 7.1 files. A multichannel file goes through the engine as several jobs with the same settings: each left/right pair as a pair, C and LFE alone (rndLayout says which). The engine's dynamics are linked inside a pair (one gain from the louder channel of the two), so each pair keeps its own image; they are not linked from one job to the next. */
+const RND_MAIN=FORCE_SP||typeof Worker!=='function';
+async function ossRenderCore(make, job, post, ctl, yld){
+  const sr=job.sr, C=job.ch, two=C.length>1, L=C[0].length, N=2048, B=128;
+  let Cls=null; const oL=new Float32Array(L), oR=new Float32Array(L); let f=0, bad=0;
+  const port={ onmessage:null, postMessage(m){
+    if(!(m&&m[0]==='r'&&m[1])) return;
+    const c=m[1], nf=c.length>>1;   /* written as it arrives: the engine reuses this buffer */
+    for(let i=0;i<nf;i++,f++){
+      const k=f-N;
+      if(k>=0&&k<L){ let x=c[2*i], y=c[2*i+1]; if(!(x>-1e6&&x<1e6)){ x=0; bad++; } if(!(y>-1e6&&y<1e6)){ y=0; bad++; } oL[k]=x; oR[k]=y; }
+    }
+  } };
+  class Base{ constructor(){ this.port=port; } }
+  const setT=make(Base,(nm,K)=>{ Cls=K; },sr);
+  if(!Cls) throw new Error('the engine did not register');
+  const proc=new Cls();
+  for(let i=0;i<job.msgs.length;i++) proc.msg(job.msgs[i]);
+  proc.msg(['print',1]);
+  const nb=Math.ceil((L+N)/B), i0=new Float32Array(B), i1=new Float32Array(B), o0=new Float32Array(B), o1=new Float32Array(B);
+  const inp=[two?[i0,i1]:[i0]], outp=[[o0,o1]], a0=C[0], a1=two?C[1]:null;
+  let tw=Date.now();
+  for(let b=0;b<nb;b++){
+    const s=b*B;
+    for(let i=0;i<B;i++){ const k=s+i; i0[i]=k<L?a0[k]:0; if(two) i1[i]=k<L?a1[k]:0; }
+    setT(s/sr);
+    proc.process(inp,outp);
+    if((b&31)===31){
+      const now=Date.now();
+      if(now-tw>150){ tw=now; post({t:'prog',f:s,n:L+N}); if(yld){ await yld(); if(ctl&&ctl.stop) throw new Error('cancelled'); } }
+    }
+  }
+  proc.msg(['print',0]);
+  if(f<L+N) throw new Error('the engine stopped early');
+  let same=!two;
+  if(same){ for(let k=0;k<L;k++){ const d=oL[k]-oR[k], x=oL[k]<0?-oL[k]:oL[k]; if(d>2e-6+1e-4*x||d<-2e-6-1e-4*x){ same=false; break; } } }   /* a mono source gives two channels that differ only by rounding (the engine packs L and R into one FFT in 32-bit floats) */
+  return { ch: same?[oL]:[oL,oR], fe:proc.fe|0, bad:bad };
+}
+/* a WAV read at its own rate: 8/16/24/32-bit integer, 32/64-bit float, plain or extensible; bext and iXML kept. Anything else returns null (the browser decoder takes it). */
+function rndWav(ab){
+  const n=ab.byteLength; if(n<12) return null;
+  const dv=new DataView(ab), tg=o=>String.fromCharCode(dv.getUint8(o),dv.getUint8(o+1),dv.getUint8(o+2),dv.getUint8(o+3));
+  if(tg(0)!=='RIFF'||tg(8)!=='WAVE') return null;
+  let o=12, fm=null, dO=-1, dL=0, bext=null, ixml=null;
+  while(o+8<=n){
+    const id=tg(o), sz=dv.getUint32(o+4,true), b=o+8, open=(sz===0xFFFFFFFF||b+sz>n);
+    if(id==='data'){ if(dO<0){ dO=b; dL=open?n-b:sz; } if(open) break; }
+    else if(id==='fmt '&&sz>=16&&b+16<=n){
+      let t=dv.getUint16(b,true); if(t===0xFFFE&&sz>=26&&b+26<=n) t=dv.getUint16(b+24,true);
+      fm={ t:t, mask:(sz>=40&&dv.getUint16(b,true)===0xFFFE&&b+28<=n)?dv.getUint32(b+20,true):-1, ch:dv.getUint16(b+2,true), sr:dv.getUint32(b+4,true), ba:dv.getUint16(b+12,true), bits:dv.getUint16(b+14,true) };
+    }
+    else if(id==='bext'&&!bext) bext=new Uint8Array(ab.slice(b,Math.min(n,b+sz)));
+    else if(id==='iXML'&&!ixml) ixml=new Uint8Array(ab.slice(b,Math.min(n,b+sz)));
+    o=b+sz+(sz&1);
+  }
+  if(!fm||dO<0) return null;
+  const ch=fm.ch, bits=fm.bits, bps=bits>>3, ba=fm.ba||ch*bps;
+  if(ch<1||ch>64||bps<1||ba<ch*bps||!(fm.sr>0)) return null;
+  const ok=(fm.t===1&&(bits===8||bits===16||bits===24||bits===32))||(fm.t===3&&(bits===32||bits===64));
+  if(!ok) return null;
+  const fr=Math.floor(dL/ba); if(fr<1) return null;
+  const outc=[];
+  for(let c=0;c<ch;c++){
+    const x=new Float32Array(fr); let p=dO+c*bps;
+    if(fm.t===3&&bits===32) for(let i=0;i<fr;i++,p+=ba) x[i]=dv.getFloat32(p,true);
+    else if(fm.t===3) for(let i=0;i<fr;i++,p+=ba) x[i]=dv.getFloat64(p,true);
+    else if(bits===16) for(let i=0;i<fr;i++,p+=ba) x[i]=dv.getInt16(p,true)/32768;
+    else if(bits===24) for(let i=0;i<fr;i++,p+=ba) x[i]=(dv.getUint8(p)|(dv.getUint8(p+1)<<8)|(dv.getInt8(p+2)<<16))/8388608;
+    else if(bits===32) for(let i=0;i<fr;i++,p+=ba) x[i]=dv.getInt32(p,true)/2147483648;
+    else for(let i=0;i<fr;i++,p+=ba) x[i]=(dv.getUint8(p)-128)/128;
+    outc.push(x);
+  }
+  return { sr:fm.sr, ch:outc, bext:bext, ixml:ixml, how:'', mask:fm.mask };
+}
+/* anything else the browser can decode (mp3, m4a, flac, ogg, a video's audio): it comes back at 48 kHz */
+function rndDecode(ab){
+  const OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  if(!OC) return Promise.reject(new Error('this browser cannot decode that file'));
+  return new Promise((res,rej)=>{
+    const c=new OC(2,1,48000);
+    const ok=b=>{ const ch=[]; for(let i=0;i<b.numberOfChannels;i++) ch.push(b.getChannelData(i).slice()); res({ sr:b.sampleRate, ch:ch, bext:null, ixml:null, how:'decoded at '+(b.sampleRate/1000)+' kHz' }); };
+    const bad=()=>rej(new Error('cannot decode this file (not audio, or a format this browser does not read)'));
+    try{ const p=c.decodeAudioData(ab.slice(0),ok,bad); if(p&&p.then) p.then(ok,bad); }catch(_){ bad(); }
+  });
+}
+/* the settings as the engine gets them at POWER: every parameter, the gate curves, the aims */
+function rndMsgs(){
+  const m=[]; for(let i=0;i<NP;i++) m.push(['p',i,state.p[i]]);
+  const mk=(ch,a)=>{ const q=['eq',ch,a.length]; a.forEach(v=>q.push(v[0],v[1])); return q; };
+  m.push(mk(0,eqL)); if(state.p[12]<=0.5) m.push(mk(1,eqR));
+  const t=['tg',TGT.length]; TGT.forEach(a=>t.push(a[0],a[1],a[2]|0,a[3]|0)); m.push(t);
+  return m;
+}
+async function rndMake(){
+  const body='window.__ossuaryRN=function(AudioWorkletProcessor,registerProcessor,sampleRate){\nlet currentTime=0;\n'+WORKLET_SRC+'\nreturn function(t){ currentTime=t; };\n};';
+  delete window.__ossuaryRN;
+  try{ runInline(body); }catch(_){}
+  if(typeof window.__ossuaryRN!=='function') await runBlob(body);
+  const make=window.__ossuaryRN; delete window.__ossuaryRN;
+  if(typeof make!=='function') throw new Error('the engine would not load');
+  return make;
+}
+/* run one job: in a worker where one will start, else on the page in slices that yield (MessageChannel, so a hidden tab does not slow it) */
+function rndRun(job, onProg){
+  const ctl={ stop:false, rej:null }; let wk=null, wurl='';
+  const cancel=()=>{ ctl.stop=true; if(wk){ try{ wk.terminate(); }catch(_){} wk=null; if(ctl.rej) ctl.rej(new Error('cancelled')); } };
+  const p=(async()=>{
+    if(!RND_MAIN){
+      try{
+        return await new Promise((res,rej)=>{
+          ctl.rej=rej;
+          const src='"use strict";\nconst make=function(AudioWorkletProcessor,registerProcessor,sampleRate){\nlet currentTime=0;\n'+WORKLET_SRC+'\nreturn function(t){ currentTime=t; };\n};\nconst core='+ossRenderCore.toString()+';\n'
+            +'self.onmessage=async e=>{ try{ const r=await core(make,e.data,m=>self.postMessage(m)); self.postMessage({t:"done",ch:r.ch,fe:r.fe,bad:r.bad},r.ch.map(a=>a.buffer)); }catch(err){ self.postMessage({t:"err",msg:String(err&&err.message||err)}); } };\nself.postMessage({t:"up"});';
+          wurl=URL.createObjectURL(new Blob([src],{type:'application/javascript'}));
+          let up=false;
+          try{ wk=new Worker(wurl); }catch(err){ rej(Object.assign(new Error('worker'),{nowk:true})); return; }
+          wk.onmessage=e=>{
+            const d=e.data; if(!d) return;
+            if(d.t==='up'){ up=true; wk.postMessage(job,job.ch.map(a=>a.buffer)); }
+            else if(d.t==='prog') onProg(d.f/d.n);
+            else if(d.t==='done') res(d);
+            else if(d.t==='err') rej(new Error(d.msg));
+          };
+          wk.onerror=e=>{ if(e&&e.preventDefault) e.preventDefault(); rej(Object.assign(new Error('the render worker failed'),{nowk:!up})); };
+        });
+      }catch(err){ if(!(err&&err.nowk)) throw err; }
+      finally{ if(wk){ try{ wk.terminate(); }catch(_){} wk=null; } if(wurl){ URL.revokeObjectURL(wurl); wurl=''; } }
+    }
+    if(ctl.stop) throw new Error('cancelled');
+    const make=await rndMake();
+    const yld=()=>new Promise(r=>{ const mc=new MessageChannel(); mc.port1.onmessage=()=>{ mc.port1.close(); r(); }; mc.port2.postMessage(0); });
+    const r=await ossRenderCore(make,job,m=>{ if(m.t==='prog') onProg(m.f/m.n); },ctl,yld);
+    return { t:'done', ch:r.ch, fe:r.fe, bad:r.bad };
+  })();
+  return { p:p, cancel:cancel };
+}
+/* 32-bit float WAV (format 3 + fact), extra chunks (bext, iXML) between fact and data, in 16K-frame blocks so nothing is copied whole */
+function wavF32(chs, sr, extra, mask){
+  const ch=chs.length, n=chs[0].length, IB=16384, parts=[];
+  const hd=(id,sz)=>{ const h=new DataView(new ArrayBuffer(8)); for(let i=0;i<4;i++) h.setUint8(i,id.charCodeAt(i)); h.setUint32(4,sz,true); return h; };
+  const ck=(id,b)=>{ const o=[hd(id,b.byteLength),b]; if(b.byteLength&1) o.push(new Uint8Array(1)); return o; };
+  const ex=ch>2, f=new DataView(new ArrayBuffer(ex?40:18)); f.setUint16(0,ex?0xFFFE:3,true); f.setUint16(2,ch,true); f.setUint32(4,sr,true); f.setUint32(8,sr*ch*4,true); f.setUint16(12,ch*4,true); f.setUint16(14,32,true); f.setUint16(16,ex?22:0,true);
+  if(ex){ f.setUint16(18,32,true); f.setUint32(20,mask>0?mask:(({4:0x33,5:0x3B,6:0x3F,8:0x63F})[ch]||0),true); [3,0,0,0,0,0,16,0,128,0,0,170,0,56,155,113].forEach((v,i)=>f.setUint8(24+i,v)); }
+  const fa=new DataView(new ArrayBuffer(4)); fa.setUint32(0,n,true);
+  parts.push(...ck('fmt ',f),...ck('fact',fa));
+  (extra||[]).forEach(x=>parts.push(...ck(x.id,x.bytes)));
+  parts.push(hd('data',n*ch*4));
+  let blk=[];
+  for(let s=0;s<n;s+=IB){
+    const m=Math.min(IB,n-s), o=new Float32Array(m*ch);
+    for(let c=0;c<ch;c++){ const x=chs[c]; for(let i=0;i<m;i++) o[i*ch+c]=x[s+i]; }
+    blk.push(o); if(blk.length===32){ parts.push(new Blob(blk)); blk=[]; }
+  }
+  if(blk.length) parts.push(new Blob(blk));
+  const tot=parts.reduce((a,x)=>a+(x.size!==undefined?x.size:x.byteLength),4), rh=new DataView(new ArrayBuffer(12));
+  'RIFF'.split('').forEach((c,i)=>rh.setUint8(i,c.charCodeAt(0))); rh.setUint32(4,tot,true); 'WAVE'.split('').forEach((c,i)=>rh.setUint8(8+i,c.charCodeAt(0)));
+  return new Blob([rh,...parts],{type:'audio/wav'});
+}
+/* the source's metadata, carried over: bext gets one more coding-history line, iXML gets the new bit depth and a note; only when the channel count is unchanged */
+function rndExtra(src, outCh, sr, tag, note){
+  const ex=[]; if(outCh!==src.ch.length) return ex;
+  const xe=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  if(src.bext){
+    if(src.bext.length>=602){
+      let h=''; for(let i=602;i<src.bext.length;i++){ const c=src.bext[i]; if(!c) break; h+=String.fromCharCode(c); }
+      if(h&&!/\n$/.test(h)) h+='\r\n';
+      h+='A=PCM,F='+sr+',W=32,M='+(outCh>2?(outCh===3&&src.mask===7?'3.0':({3:'2.1',4:'quad',5:'4.1',6:'5.1',8:'7.1'})[outCh])||outCh+'ch':outCh>1?'stereo':'mono')+',T=OSSUARY IEEE-FLOAT\r\n';
+      const b=new Uint8Array(602+h.length); b.set(src.bext.subarray(0,602)); for(let i=0;i<h.length;i++) b[602+i]=h.charCodeAt(i)&127;
+      ex.push({id:'bext',bytes:b});
+    } else ex.push({id:'bext',bytes:src.bext});
+  }
+  if(src.ixml){
+    let x=''; try{ x=new TextDecoder('utf-8').decode(src.ixml).replace(/\0+$/,''); }catch(_){ x=''; }
+    if(x){
+      x=x.replace(/<AUDIO_BIT_DEPTH>\s*\d+\s*<\/AUDIO_BIT_DEPTH>/,'<AUDIO_BIT_DEPTH>32</AUDIO_BIT_DEPTH>');
+      x=x.replace('</NOTE>',()=>' | '+xe(note)+'</NOTE>');
+      ex.push({id:'iXML',bytes:new TextEncoder().encode(x)});
+    } else ex.push({id:'iXML',bytes:src.ixml});
+  }
+  return ex;
+}
+/* which channels go through together. WAV channel masks name the layout (bits in file order: FL FR FC LFE BL BR FLC FRC BC SL SR); a file with no mask is read by its channel count.
+   2.1 L R LFE (or 3.0 L R C: the same pair and a single) · quad L R Ls Rs · 4.1 L R LFE Ls Rs · 5.1 L R C LFE Ls Rs · 7.1 L R C LFE Lb Rb Ls Rs. Pairs are L/R and each surround pair; C and LFE go alone. */
+const RND_LAY={ 3:{m:[0,0xB,0x7],g:[[0,1],[2]],n:'2.1'}, 4:{m:[0,0x33,0x603],g:[[0,1],[2,3]],n:'quad'}, 5:{m:[0x3B,0x60B],g:[[0,1],[3,4],[2]],n:'4.1'}, 6:{m:[0,0x3F,0x60F],g:[[0,1],[4,5],[2],[3]],n:'5.1'}, 8:{m:[0,0x63F,0xFF],g:[[0,1],[4,5],[6,7],[2],[3]],n:'7.1'} };
+function rndLayout(nc, mask){
+  if(nc===1) return { g:[[0]], n:'mono' };
+  if(nc===2) return { g:[[0,1]], n:'stereo' };
+  const d=RND_LAY[nc], mk=mask>0?mask:0;
+  if(!d) throw new Error('mono, stereo, 2.1, quad, 4.1, 5.1 and 7.1 files only (this one has '+nc+' channels)');
+  if(d.m.indexOf(mk)<0) throw new Error(nc===5&&!mk?'a five-channel file needs a 4.1 channel mask (L R LFE Ls Rs) to be read as 4.1':'this '+nc+'-channel file is not laid out as '+d.n+' (its channel mask is 0x'+mk.toString(16).toUpperCase()+')');
+  return { g:d.g, n:(nc===3&&mk===7)?'3.0':d.n };
+}
+function rndMaxSec(nc,sr){ const t=nc<=2?600:Math.floor(1800/nc); return sr>96000?Math.floor(t*96000/sr):t; }   /* every KAIJU-BLUE take fits (10 min stereo, 200 s 5.1, up to 96 kHz); above 96 kHz the limit shrinks so memory stays the same */
+function rndDur(s){ return s>=120&&s%60===0?(s/60)+' minutes':s>=60?Math.floor(s/60)+' min '+(s%60)+' s':s+' s'; }
+/* one file in, one rendered file out (a Blob and a name); the same call the take store will use */
+async function rndOne(f, onProg, reg){
+  let ab=await f.arrayBuffer();
+  let src=rndWav(ab); if(!src) src=await rndDecode(ab);
+  ab=null;
+  const nc=src.ch.length, L=src.ch[0].length;
+  if(!L) throw new Error('the file has no audio');
+  const lay=rndLayout(nc,src.mask);
+  if(!(src.sr>=8000&&src.sr<=384000)) throw new Error('sample rate '+src.sr+' Hz is outside 8 to 384 kHz');
+  const mx=rndMaxSec(nc,src.sr); if(L>src.sr*mx) throw new Error('longer than '+rndDur(mx)+(nc>2?' for '+lay.n:'')+(src.sr>96000?' at '+src.sr/1000+' kHz':''));
+  const tag=printTag(), pr=PRESETS[META[SLOT].pre].n+(META[SLOT].dirty?' (edited)':'')+(tag==='final'?'':' '+tag);
+  const msgs=rndMsgs(), t0=Date.now();
+  const groups=lay.g;
+  const outCh=new Array(nc); let fe=0, bad=0, stop=false, cur=null;
+  if(reg) reg(()=>{ stop=true; if(cur) cur.cancel(); });
+  for(let gi=0;gi<groups.length;gi++){
+    if(stop) throw new Error('cancelled');
+    const g=groups[gi], job={ sr:src.sr, ch:g.map(c=>src.ch[c]), msgs:msgs };
+    cur=rndRun(job,p=>{ if(onProg) onProg((gi+p)/groups.length); });
+    const d=await cur.p; cur=null;
+    fe+=d.fe|0; bad+=d.bad|0;
+    g.forEach((c,i)=>{ outCh[c]=d.ch[i]; src.ch[c]=null; });
+  }
+  const sec=L/src.sr, el=(Date.now()-t0)/1000;
+  const name=(f.name||'take.wav').replace(/\.[A-Za-z0-9]{1,5}$/,'').replace(/_(\d+(?:\.\d+)?k)(?:16|24|32f?)(?=_|$)/,'_$132f')+'-ossuary'+(tag==='final'?'':'-'+tag)+'.wav';
+  const blob=wavF32(outCh,src.sr,rndExtra(src,nc,src.sr,tag,'OSSUARY '+pr),src.mask);
+  const notes=[]; if(src.how) notes.push(src.how); if(nc>2) notes.push(lay.n+' in '+groups.length+' jobs'); if(fe) notes.push('frame errors '+fe); if(bad) notes.push(bad+' bad samples zeroed');
+  return { blob:blob, name:name, sec:sec, el:el, ch:nc, sr:src.sr, note:notes.join(' · '), fe:fe, bad:bad, tag:tag, preset:pr, patch:patchNow() };
+}
+function rndTxt(){ return RND.txt||('render '+Math.round(RND.pct*100)+' %'); }
+function rndBtn(){
+  const b=$('bt-rend'); if(!b) return;
+  b.disabled=HOSTED||(!RND&&!SRC.file);
+  b.classList.toggle('on',!!RND); b.textContent=RND?'CANCEL':'RENDER';
+  b.title=SRC.file?('render '+SRC.file.name+' offline'):'load an audio file first';
+  const tb=$('bt-takes'); if(tb) tb.disabled=!!(HOSTED||RND);
+}
+async function renderFile(){
+  if(HOSTED||RND||!SRC.file) return;
+  const f=SRC.file;
+  RND={ pct:0, txt:'reading the file', cancel:null }; rndBtn(); printPaint();
+  try{
+    const r=await rndOne(f,p=>{ if(RND){ RND.pct=p; RND.txt=''; printPaint(); } },c=>{ if(RND){ RND.cancel=c; if(RND.want) c(); } });
+    saveBytes(r.blob,r.name);
+    const kept=await tkSendBack(f,r);
+    printMsg='saved '+r.name+' · '+r.sec.toFixed(1)+' s · '+(r.sec/Math.max(0.001,r.el)).toFixed(0)+'x real time'+(r.note?' · '+r.note:'')+kept;
+    say('rendered '+r.name);
+  }catch(err){
+    let m=String(err&&err.message||err); if(/allocat|out of memory|memory/i.test(m)) m='not enough memory for this file here';
+    printMsg=m==='cancelled'?'render cancelled':'render failed: '+m;
+    if(m!=='cancelled') warn('render failed: '+m);
+  }
+  RND=null; rndBtn(); printPaint();
+}
+$('bt-rend').addEventListener('click',()=>{ if(RND){ if(RND.cancel) RND.cancel(); else RND.want=1; } else renderFile(); });
+
+
+/* SRCD take store: one IndexedDB ("srcd-takes") and one BroadcastChannel ("srcd-takes") shared by every tool opened from the same origin (same scheme, host and port).
+   A record: { id, from:'kaiju'|'ossuary', parent, k, name, blob, sec, sr, ch, patch, preset, tag, t }. Each side keeps its own newest 6, as many of them as fit in 400 MB (the newest always stays). Nothing leaves the device. */
+const TS=(()=>{
+  const DB='srcd-takes', ST='takes', KEEP=6, BUDGET=400*1048576; let db=null, bc=null; const subs=[];
+  const open=()=>db?Promise.resolve(db):new Promise((res,rej)=>{
+    if(typeof indexedDB==='undefined'||!indexedDB) return rej(new Error('this browser has no take store here'));
+    let q; try{ q=indexedDB.open(DB,1); }catch(e){ return rej(e); }
+    q.onupgradeneeded=()=>{ q.result.createObjectStore(ST,{keyPath:'id'}); };
+    q.onsuccess=()=>{ db=q.result; db.onversionchange=()=>{ try{ db.close(); }catch(_){} db=null; }; db.onclose=()=>{ db=null; }; res(db); };
+    q.onerror=()=>rej(q.error||new Error('take store failed to open')); q.onblocked=()=>rej(new Error('take store is blocked by another tab'));
+  });
+  const run=(mode,fn)=>open().then(d=>new Promise((res,rej)=>{
+    const t=d.transaction(ST,mode), r=fn(t.objectStore(ST));
+    t.oncomplete=()=>res(r&&r.result); t.onerror=()=>rej(t.error||new Error('take store error')); t.onabort=()=>rej(t.error||new Error('take store write refused (storage full?)'));
+  }));
+  const post=m=>{ try{ if(!bc&&typeof BroadcastChannel==='function'){ bc=new BroadcastChannel('srcd-takes'); bc.onmessage=e=>subs.forEach(f=>{ try{ f(e.data); }catch(_){} }); } if(bc) bc.postMessage(m); }catch(_){} };
+  const list=()=>run('readonly',s=>s.getAll()).then(a=>(a||[]).sort((x,y)=>y.t-x.t));
+  const del=id=>run('readwrite',s=>s.delete(id));
+  const prune=from=>list().then(a=>{ let by=0, full=false; return Promise.all(a.filter(r=>r.from===from).filter((r,i)=>{ by+=(r.blob&&r.blob.size)||0; if(i>=KEEP||(i>0&&by>BUDGET)) full=true; return full; }).map(r=>del(r.id))); }).catch(()=>{});
+  return {
+    put:rec=>run('readwrite',s=>s.put(rec)).then(()=>prune(rec.from)).then(()=>{ post({t:'put',id:rec.id,from:rec.from}); return rec.id; }),
+    get:id=>run('readonly',s=>s.get(id)),
+    clear:()=>run('readwrite',s=>s.clear()).then(()=>{ post({t:'clear'}); }),
+    list:list,
+    on:f=>{ subs.push(f); post({t:'hello'}); if(typeof document!=='undefined') document.addEventListener('visibilitychange',()=>{ if(!document.hidden) try{ f({t:'sync'}); }catch(_){} }); }
+  };
+})();
+const tsId=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+/* ── TAKES: pick a take from KAIJU-BLUE (same origin) and send the processed one back ──
+   TAKES lists what the shared take store holds (KAIJU-BLUE's takes and anything rendered here). Tap one: it loads like a dropped file. RENDER then saves the file as before and,
+   for a take picked from the store, also puts the processed version in the store with the patch that made it (the original stays as it is); KAIJU-BLUE shows it as a chip. */
+let TAKE_SRC=null, TK_OPEN=false;
+const TK_CH={1:'mono',2:'stereo',3:'2.1',4:'quad',5:'4.1',6:'5.1',8:'7.1'};
+function tkDraw(){
+  const box=$('takelist'); if(!box||!TK_OPEN) return;
+  TS.list().then(a=>{
+    if(!TK_OPEN) return;
+    box.textContent='';
+    if(!a.length){ const d=document.createElement('div'); d.className='note'; d.textContent='no takes · open KAIJU-BLUE from the same address'; box.appendChild(d); return; }
+    a.forEach(r=>{
+      const b=document.createElement('button'); b.className='tog'; b.type='button';
+      b.textContent=(r.from==='kaiju'?'kaiju':'ossuary')+' · '+String(r.name||'take').replace(/\.wav$/i,'')+' · '+(+r.sec||0).toFixed(1)+' s · '+(TK_CH[r.ch]||r.ch+' ch')+' · '+((+r.sr||0)/1000)+'k';
+      if(TAKE_SRC&&TAKE_SRC.id===r.id&&SRC.file===TAKE_SRC.file) b.classList.add('on');
+      b.addEventListener('click',()=>tkLoad(r.id)); box.appendChild(b);
+    });
+  }).catch(err=>{ box.textContent=''; const d=document.createElement('div'); d.className='note'; d.textContent='takes unavailable here: '+String(err&&err.message||err); box.appendChild(d); });
+}
+function tkLoad(id){
+  if(HOSTED||RND) return;
+  TS.get(id).then(r=>{
+    if(!r||!r.blob){ warn('that take is gone from the store'); tkDraw(); return; }
+    const f=new File([r.blob],r.name||'take.wav',{type:'audio/wav'});
+    TAKE_SRC={ id:r.id, k:r.k||'', file:f }; fileLoad(f); tkDraw();
+  }).catch(err=>warn('take store: '+String(err&&err.message||err)));
+}
+$('bt-takes').addEventListener('click',()=>{
+  TK_OPEN=!TK_OPEN; $('bt-takes').classList.toggle('on',TK_OPEN); $('takelist').hidden=!TK_OPEN; $('bt-tkclear').hidden=!TK_OPEN; if(TK_OPEN) tkDraw(); else tkDisarm();
+});
+try{ TS.on(()=>{ if(TK_OPEN) tkDraw(); }); }catch(_){}
+/* after a render of a take that came from the store: the processed version goes back, with the patch that made it */
+async function tkSendBack(f,r){
+  if(!TAKE_SRC||TAKE_SRC.file!==f) return '';
+  try{
+    await TS.put({ id:tsId('o'), from:'ossuary', parent:TAKE_SRC.id, k:TAKE_SRC.k, name:r.name, blob:r.blob, sec:r.sec, sr:r.sr, ch:r.ch, patch:r.patch, preset:r.preset, tag:r.tag, t:Date.now() });
+    return ' · sent to takes';
+  }catch(err){ return ' · take store: '+String(err&&err.message||err); }
+}
+/* CLEAR: empties the whole store (KAIJU-BLUE's takes and the processed ones). Two taps, the second within 4 s, so it cannot happen by accident. */
+let tkArm=0;
+function tkDisarm(){ clearTimeout(tkArm); tkArm=0; const b=$('bt-tkclear'); b.textContent='CLEAR'; b.classList.remove('on'); }
+$('bt-tkclear').addEventListener('click',()=>{
+  const b=$('bt-tkclear');
+  if(!tkArm){ b.textContent='DELETE ALL?'; b.classList.add('on'); tkArm=setTimeout(tkDisarm,4000); return; }
+  tkDisarm();
+  TS.clear().then(()=>{ printMsg='take store cleared'; printPaint(); tkDraw(); }).catch(err=>warn('take store: '+String(err&&err.message||err)));
+});
+/* ── the engine, standalone: an AudioWorklet where the browser will load one, the main thread where it will not ──
+   Chrome refuses a blob: worklet module from a file:// page, so the order is blob: -> data: -> ScriptProcessor.
+   The ScriptProcessor path runs the very same processor class (same source, same maths); only the block size differs. */
+const BOOTLOG=[];
+async function awLoad(c, how){
+  let url, rev=false;
+  if(how==='blob'){ url=URL.createObjectURL(new Blob([WORKLET_SRC],{type:'application/javascript'})); rev=true; }
+  else url='data:application/javascript;charset=utf-8,'+encodeURIComponent(WORKLET_SRC);
+  try{ await c.audioWorklet.addModule(url); } finally{ if(rev) URL.revokeObjectURL(url); }
+}
+function awNode(c){
+  /* stereo in, stereo out: a mono source is up-mixed instead of arriving as one channel */
+  const n=new AudioWorkletNode(c, PROC, { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[2], channelCount:2, channelCountMode:'explicit', channelInterpretation:'speakers' });
+  n.onprocessorerror=()=>{ warn('ERR — the engine stopped, its processor threw'); };
+  n.connect(c.destination);
+  return n;
+}
+function runInline(src){ const s=document.createElement('script'); s.textContent=src; document.head.appendChild(s); s.remove(); }
+function runBlob(src){
+  return new Promise((res, rej)=>{
+    const u=URL.createObjectURL(new Blob([src],{type:'application/javascript'})), s=document.createElement('script');
+    s.onload=()=>{ URL.revokeObjectURL(u); s.remove(); res(); };
+    s.onerror=()=>{ URL.revokeObjectURL(u); s.remove(); rej(new Error('this page would not run the engine script')); };
+    s.src=u; document.head.appendChild(s);
+  });
+}
+async function spEngine(c){
+  const body='window.__ossuarySP=function(AudioWorkletProcessor,registerProcessor,sampleRate){\nlet currentTime=0;\n'+WORKLET_SRC+'\nreturn function(t){ currentTime=t; };\n};';
+  delete window.__ossuarySP;
+  try{ runInline(body); }catch(_){}
+  if(typeof window.__ossuarySP!=='function') await runBlob(body);
+  const make=window.__ossuarySP; delete window.__ossuarySP;
+  if(typeof make!=='function') throw new Error('the engine would not load');
+  let Cls=null;
+  const toProc={ onmessage:null, postMessage(m){ if(m&&m[0]==='r'&&m[1]) m=['r', m[1].slice()]; setTimeout(()=>{ if(toFace.onmessage) toFace.onmessage({data:m}); },0); } };
+  const toFace={ onmessage:null, postMessage(m){ if(toProc.onmessage) toProc.onmessage({data:m}); } };
+  class Base{ constructor(){ this.port=toProc; } }
+  const setT=make(Base, (name,K)=>{ Cls=K; }, c.sampleRate);
+  if(!Cls) throw new Error('the engine did not register');
+  const proc=new Cls();
+  const spn=c.createScriptProcessor(SPBUF, 2, 2);
+  spn.port=toFace;
+  spn.onaudioprocess=e=>{
+    try{
+      const ib=e.inputBuffer, ob=e.outputBuffer;
+      setT(e.playbackTime||c.currentTime);
+      proc.process([[ib.getChannelData(0), ib.getChannelData(ib.numberOfChannels>1?1:0)]], [[ob.getChannelData(0), ob.getChannelData(1)]]);
+    }catch(err){
+      spn.onaudioprocess=null; try{ spn.disconnect(); }catch(_){}
+      warn('ERR — the engine stopped, its processor threw');
+    }
+  };
+  spn.connect(c.destination);
+  return spn;
+}
+let WAKE=[];
+function ctxUnwake(){ WAKE.forEach(f=>f()); WAKE=[]; }
+/* a context made without a recent gesture starts suspended: ask it to run now and on every tap until it does */
+function ctxWake(c){
+  const go=()=>{ if(c.state==='closed'){ ctxUnwake(); return; } if(c.state!=='running'){ try{ const p=c.resume(); if(p&&p.catch) p.catch(()=>{}); }catch(_){} } };
+  ['pointerdown','keydown','touchend'].forEach(t=>{ document.addEventListener(t, go, {capture:true, passive:true}); WAKE.push(()=>document.removeEventListener(t, go, {capture:true})); });
+  c.onstatechange=()=>{ if(c===ctx){ liveTxt(); if(c.state==='running') say('audio running'); } };
+  go();
+}
+async function bootStandalone(){
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) throw new Error('this browser has no Web Audio');
+  let c=new AC({ latencyHint:'interactive' });
+  if(c.sampleRate<SRCD_RATES.min || c.sampleRate>SRCD_RATES.max){   /* same window the rack asks for */
+    try{ const c2=new AC({ latencyHint:'interactive', sampleRate:SRCD_RATES.prefer }); try{ c.close(); }catch(_){} c=c2; }catch(_){}
+  }
+  try{
+    let node=null, eng='';
+    if(!FORCE_SP && c.audioWorklet && typeof AudioWorkletNode==='function'){
+      let loaded=false;
+      for(const how of ['blob','data']){
+        try{ await awLoad(c, how); loaded=true; eng=how==='blob'?'aw':'aw-data'; break; }
+        catch(err){ BOOTLOG.push(how+': '+String(err&&err.message||err)); }
+      }
+      if(loaded){ try{ node=awNode(c); }catch(err){ BOOTLOG.push('node: '+String(err&&err.message||err)); node=null; } }
+    }
+    if(!node){ node=await spEngine(c); eng='sp'; }
+    ctxWake(c);
+    return { ctx:c, node:node, sr:c.sampleRate, eng:eng };
+  }catch(err){ try{ c.close(); }catch(_){} throw err; }
+}
+
+/* ── standalone inputs: a test signal, a file or the microphone, one at a time, straight into the engine ── */
+const SRCN={ none:'none', gen:'test signal', file:'file', mic:'microphone' };
+const SRC={ kind:'none', gen:-1, file:null };
+let srcDispose=null, srcTok=0, fileAudio=null, seekDrag=false;
+const gbs=[$('g0'),$('g1'),$('g2'),$('g3')], GENN=['tone','noise','sibilance','series'];
+function srcClear(){
+  srcTok++;
+  if(srcDispose){ const f=srcDispose; srcDispose=null; try{ f(); }catch(_){} }
+  gbs.forEach(b=>{ b.classList.remove('on'); b.setAttribute('aria-pressed','false'); });
+  $('bt-mic').classList.remove('on'); $('bt-mic').setAttribute('aria-pressed','false');
+  $('bt-file').classList.remove('on');
+  $('xport').hidden=true; fileAudio=null; fitPages();
+}
+function paintSrc(){
+  $('src-name').textContent=SRCN[SRC.kind];
+  $('srcnote').textContent=SRC.kind==='gen'?GENN[SRC.gen]:SRC.kind==='file'&&SRC.file?SRC.file.name:SRC.kind==='mic'?'use headphones: the mic feeds the speakers':'pick a test signal, a file, or the mic';
+  $('srcnote').title=SRC.kind==='file'&&SRC.file?SRC.file.name:'';
+  rndBtn();
+}
+function srcChoose(kind, arg){
+  if(HOSTED) return;
+  srcClear();
+  SRC.kind=kind; if(kind==='gen') SRC.gen=arg; if(kind==='file') SRC.file=arg;
+  paintSrc();
+  if(kind==='none') return;
+  if(!powered){ if(!booting) powerOn(); }     /* powerOn attaches whatever is wanted when it is up */
+  else srcAttach();
+}
+function srcAttach(){
+  if(HOSTED||!powered||!ctx||!node) return;
+  if(SRC.kind==='gen') genStart(SRC.gen);
+  else if(SRC.kind==='file' && SRC.file) fileAttach(SRC.file);
+  else if(SRC.kind==='mic') micAttach();
+  paintSrc();
+}
+/* test signals (the originals, unchanged) */
+function genStart(k2){
+  const sr=ctx.sampleRate, len=Math.floor(sr*2), buf=ctx.createBuffer(2,len,sr);
+  for(let ch=0;ch<2;ch++){
+    const d=buf.getChannelData(ch);
+    for(let i=0;i<len;i++){
+      const t=i/sr;
+      if(k2===0) d[i]=(2*((t*110)%1)-1)*0.22;
+      else if(k2===1) d[i]=(Math.random()*2-1)*0.2;
+      else if(k2===3){ let v=0; for(let k=1;k<=6;k++) v+=Math.sin(6.283185307179586*200*k*t)*(0.16/k); d[i]=v+Math.sin(6.283185307179586*530*t)*0.07; }
+      else{
+        const ph=(t%0.25)/0.25;
+        const edge=ph<0.02?ph/0.02:(ph>0.58&&ph<0.6?(0.6-ph)/0.02:1);
+        d[i]=Math.sin(6.283185307179586*6500*t)*0.5*(ph<0.6?Math.min(1,edge):0);
+      }
+    }
+  }
+  const g=ctx.createBufferSource();
+  g.buffer=buf; g.loop=true; g.connect(node); g.start();
+  srcDispose=()=>{ try{ g.stop(); }catch(_){} try{ g.disconnect(); }catch(_){} };
+  gbs[k2].classList.add('on'); gbs[k2].setAttribute('aria-pressed','true');
+}
+gbs.forEach((b,i)=>b.addEventListener('click', ()=>{ if(SRC.kind==='gen'&&SRC.gen===i) srcChoose('none'); else srcChoose('gen', i); }));
+/* a file: a media element into the graph, so it streams, seeks, loops and decodes whatever the browser can */
+const fmtT=s=>{ s=Math.max(0,s|0); return ((s/60)|0)+':'+('0'+(s%60)).slice(-2); };
+function paintXport(){
+  const a=fileAudio; if(!a) return;
+  $('bt-play').textContent=a.paused?'Play':'Pause'; $('bt-play').classList.toggle('on', !a.paused);
+  const d=a.duration>0&&isFinite(a.duration)?a.duration:0;
+  if(!seekDrag) $('seek').value=d?a.currentTime/d:0;
+  $('tpos').textContent=fmtT(a.currentTime)+' / '+(d?fmtT(d):'-:--');
+}
+function fileAttach(f){
+  const url=URL.createObjectURL(f), a=new Audio(), tok=srcTok;
+  a.preload='auto'; a.loop=$('bt-loop').classList.contains('on'); a.src=url;
+  let mn=null;
+  try{ mn=ctx.createMediaElementSource(a); mn.connect(node); }
+  catch(err){ URL.revokeObjectURL(url); warn('cannot play '+f.name+': '+String(err&&err.message||err)); SRC.kind='none'; paintSrc(); return; }
+  srcDispose=()=>{ try{ a.pause(); }catch(_){} try{ mn.disconnect(); }catch(_){} a.removeAttribute('src'); try{ a.load(); }catch(_){} URL.revokeObjectURL(url); };
+  fileAudio=a;
+  ['timeupdate','play','pause','durationchange','loadedmetadata'].forEach(t=>a.addEventListener(t, ()=>{ if(tok===srcTok) paintXport(); }));
+  a.addEventListener('error', ()=>{ if(tok!==srcTok) return; SRC.kind='none'; srcClear(); paintSrc(); warn('cannot decode '+f.name+' (this browser may not read that format)'); });
+  $('bt-file').classList.add('on'); $('xport').hidden=false; paintXport();
+  const p=a.play(); if(p&&p.catch) p.catch(err=>{ if(tok===srcTok && !a.error && !(err&&err.name==='NotSupportedError')){ say('press play to start the file'); paintXport(); } });
+  fitPages();
+}
+const AUDIO_EXT=/\.(wav|wave|mp3|flac|ogg|oga|opus|m4a|aac|aif|aiff|caf|webm|weba|mp4|mka)$/i;
+function fileLoad(f){
+  if(!f) return;
+  if(!(/^(audio|video)\//.test(f.type) || AUDIO_EXT.test(f.name))){ warn('not an audio file: '+f.name); return; }
+  srcChoose('file', f);
+}
+$('bt-file').addEventListener('click', ()=>{ if(!HOSTED) $('file-in').click(); });
+$('file-in').addEventListener('change', e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; fileLoad(f); });
+$('bt-play').addEventListener('click', ()=>{ const a=fileAudio; if(!a) return; if(a.paused){ const p=a.play(); if(p&&p.catch) p.catch(()=>{}); } else a.pause(); });
+$('bt-loop').addEventListener('click', ()=>{ const on=!$('bt-loop').classList.contains('on'); $('bt-loop').classList.toggle('on', on); $('bt-loop').setAttribute('aria-pressed', on?'true':'false'); if(fileAudio) fileAudio.loop=on; });
+$('seek').addEventListener('input', ()=>{ const a=fileAudio; if(a&&a.duration>0&&isFinite(a.duration)){ seekDrag=true; a.currentTime=(+$('seek').value)*a.duration; $('tpos').textContent=fmtT(a.currentTime)+' / '+fmtT(a.duration); } });
+$('seek').addEventListener('change', ()=>{ seekDrag=false; paintXport(); });
+/* the microphone: raw (no echo cancel, noise suppression or auto gain: they would colour what the effect hears) */
+function micFail(err){
+  SRC.kind='none'; srcClear(); paintSrc();
+  const n=err&&err.name;
+  warn(n==='NotAllowedError'||n==='SecurityError' ? 'microphone blocked · allow it in the browser (inside a frame the host page must allow it too)'
+     : n==='NotFoundError' ? 'no microphone found'
+     : n==='NotReadableError' ? 'the microphone is busy or unavailable'
+     : 'microphone: '+String(err&&err.message||err||'unavailable'));
+}
+async function micList(){
+  try{
+    const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'&&d.deviceId!=='default'&&d.deviceId!=='communications');
+    const sel=$('mic-dev'), cur=sel.value; sel.textContent='';
+    const o0=document.createElement('option'); o0.value=''; o0.textContent='default input'; sel.appendChild(o0);
+    ds.forEach((d,i)=>{ const o=document.createElement('option'); o.value=d.deviceId; o.textContent=(d.label||('input '+(i+1))).slice(0,40); sel.appendChild(o); });
+    if(Array.prototype.some.call(sel.options,o=>o.value===cur)) sel.value=cur;
+    sel.hidden=ds.length<2;
+  }catch(_){}
+}
+async function micAttach(){
+  const tok=srcTok, md=navigator.mediaDevices;
+  if(!md||!md.getUserMedia){ micFail({ name:'SecurityError', message:'no microphone access here' }); return; }
+  const raw={ echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:2 }, dev=$('mic-dev').value;
+  let stream=null, err0=null;
+  try{ stream=await md.getUserMedia({ audio: dev?Object.assign({ deviceId:{ exact:dev } }, raw):raw }); }
+  catch(err){ err0=err; }
+  if(!stream && err0 && (err0.name==='OverconstrainedError'||err0.name==='ConstraintNotSatisfiedError')){
+    try{ stream=await md.getUserMedia({ audio:true }); err0=null; }catch(e2){ err0=e2; }
+  }
+  if(!stream){ if(tok===srcTok) micFail(err0); return; }
+  if(tok!==srcTok||!powered||!ctx||!node){ stream.getTracks().forEach(t=>t.stop()); return; }
+  const mn=ctx.createMediaStreamSource(stream); mn.connect(node);
+  srcDispose=()=>{ try{ mn.disconnect(); }catch(_){} stream.getTracks().forEach(t=>t.stop()); };
+  stream.getAudioTracks().forEach(t=>t.addEventListener('ended', ()=>{ if(tok===srcTok){ warn('the microphone was disconnected'); srcChoose('none'); } }));
+  $('bt-mic').classList.add('on'); $('bt-mic').setAttribute('aria-pressed','true');
+  say('microphone on · use headphones to avoid feedback');
+  micList();
+}
+$('bt-mic').addEventListener('click', ()=>{ if(SRC.kind==='mic') srcChoose('none'); else srcChoose('mic'); });
+$('mic-dev').addEventListener('change', ()=>{ if(SRC.kind==='mic') srcChoose('mic'); });
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener){ try{ navigator.mediaDevices.addEventListener('devicechange', micList); }catch(_){} }
+/* drop an audio file anywhere on the face */
+(function dropZone(){
+  let depth=0;
+  const has=e=>{ const t=e.dataTransfer&&e.dataTransfer.types; return !!t&&Array.prototype.indexOf.call(t,'Files')>=0; };
+  const end=()=>{ depth=0; document.body.classList.remove('dropping'); };
+  window.addEventListener('dragenter', e=>{ if(HOSTED||!has(e)) return; e.preventDefault(); depth++; document.body.classList.add('dropping'); });
+  window.addEventListener('dragover', e=>{ if(HOSTED||!has(e)) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='copy'; }catch(_){} });
+  window.addEventListener('dragleave', ()=>{ if(HOSTED) return; depth=Math.max(0,depth-1); if(!depth) document.body.classList.remove('dropping'); });
+  window.addEventListener('drop', e=>{ end(); if(HOSTED||!has(e)) return; e.preventDefault(); const fs=e.dataTransfer.files; let f=null; for(let i=0;fs&&i<fs.length;i++){ if(/^(audio|video)\//.test(fs[i].type)||AUDIO_EXT.test(fs[i].name)){ f=fs[i]; break; } } if(f) fileLoad(f); else if(fs&&fs.length) warn('not an audio file: '+fs[0].name); });
+  window.addEventListener('blur', end);
+})();
+
+/* ── run mode: apply it to the face ── */
+const PRINT_NOTE=$('printnote').textContent;
+function applyMode(){
+  document.body.classList.toggle('solo', !HOSTED);
+  $('bt-print').disabled=HOSTED;
+  $('printnote').textContent=HOSTED?'hosted print waits for a host file facility · standalone prints now':PRINT_NOTE;
+  if(!powered&&!booting) stat(idleStr());
+  paintSrc(); fitPages();
+}
+
+/* ── hosted: the rack owns the node (fail closed, never a private context beside it) ──
+   The rack is asked with wl-mount. A page in a frame that no rack ever answers (a preview pane, a host that is not a rack) is
+   told so after PROBE_MS and runs standalone; a rack we have heard from, or #rack in the address, is waited for for 30 s and
+   never replaced. If a rack does speak later the face hands the audio back to it (rackHeard). */
+function srcdMount(o){
+  return new Promise((res, rej)=>{
+    const t0=Date.now(), strict=RACK_SEEN||MODE_FORCE==='rack'; let deadline=t0+(strict?30000:PROBE_MS);
+    let to=setTimeout(function tick(){
+      if(Date.now()>=deadline){
+        window.removeEventListener('message', h);
+        const sure=RACK_SEEN||MODE_FORCE==='rack', er=new Error(sure?'the rack did not answer wl-mount in 30 s':'no rack answered wl-mount'); er.norack=!sure;
+        srcdUp({ src:'srcd-duo', cmd:'wl-kill', mod:SRCD_MOD });   /* a slow rack must not keep a mount nobody uses */
+        rej(er);
+      }
+      else to=setTimeout(tick, strict?1000:100);
+    }, strict?1000:100);
+    function h(e){
+      if (window.parent !== window && !srcdAdmit(e)) return;
+      const d=e.data;
+      if(!d || d.src!=='srcd-duo' || d.mod!==SRCD_MOD) return;
+      if(d.cmd==='wl-ready'){
+        RACK_SEEN=true; clearTimeout(to); window.removeEventListener('message', h);
+        const proxy={ port:{ postMessage(m){ srcdUp({src:'srcd-duo', cmd:'wl-send', mod:SRCD_MOD, m}); }, onmessage:null } };
+        res({ node:proxy, sr:d.sr });
+      } else if(d.cmd==='wl-fail'){
+        RACK_SEEN=true; clearTimeout(to); window.removeEventListener('message', h); rej(new Error(d.err || 'the rack refused the worklet'));
+      } else if(d.cmd==='wl-progress'){
+        RACK_SEEN=true; deadline=Date.now()+30000;
+        if(Date.now()-t0>=90000) deadline=Date.now();
+      }
+    }
+    window.addEventListener('message', h);
+    srcdUp(Object.assign({src:'srcd-duo', cmd:'wl-mount', mod:SRCD_MOD,
+      preferRate:SRCD_RATES.prefer, minRate:SRCD_RATES.min, maxRate:SRCD_RATES.max}, o));
+  });
+}
+function pwrPaint(){ const b=$('pwr'); b.classList.toggle('on', powered); b.setAttribute('aria-pressed', powered?'true':'false'); }
+function pwrSay(){ srcdUp({ src:'srcd-duo', cmd:'pwr-state', mod:SRCD_MOD, on:powered }); }
+let BOOTGEN=0, tearing=false;
+async function powerOn(){
+  if(powered || booting || tearing) return;
+  booting=true; const gen=++BOOTGEN;
+  stat(HOSTED ? 'mounting in the rack…' : 'starting…');
+  try{
+    let r=null;
+    if(HOSTED){
+      try{ const m=await srcdMount({ source:WORKLET_SRC, processor:PROC, opts:{} }); r={ ctx:null, node:m.node, sr:m.sr, eng:'rack' }; }
+      catch(err){
+        if(err && err.norack && gen===BOOTGEN){ FALLBACK=true; HOSTED=false; applyMode(); say('no rack answered · running standalone'); }
+        else throw err;
+      }
+      if(gen!==BOOTGEN){ if(r) srcdUp({ src:'srcd-duo', cmd:'wl-kill', mod:SRCD_MOD }); return; }
+    }
+    if(!r){
+      stat('starting…');
+      r=await bootStandalone();
+      if(gen!==BOOTGEN){ try{ r.ctx.close(); }catch(_){} ctxUnwake(); return; }   /* a rack spoke while we booted: it owns the audio */
+    }
+    ctx=r.ctx; node=r.node; srNow=r.sr; ENG=r.eng; powered=true; ERRN=0;
+    if(!HOSTED) node.port.onmessage=e=>wmsg(e.data);
+    buildRows(srNow);
+    for(let i=0;i<NP;i++) send('p', i, state.p[i]);
+    { const q0=QUIET; QUIET=true; sendEq(); sendTg(); QUIET=q0; } drawEq();
+    srcAttach();
+    if(HOSTED) stat('live · '+(srNow/1000).toFixed(1)+' khz · lat '+latTxt()+' · in the rack');
+    else liveTxt();
+    say(HOSTED?'mounted in the rack':'engine running'+(ENG==='sp'?' on the main thread':''));
+  }catch(err){
+    warn('ERR ' + String(err && err.message || err));
+  }finally{ if(gen===BOOTGEN) booting=false; pwrPaint(); pwrSay(); }
+}
+/* off: a recording in flight is finished first (the engine flushes its tail, then answers), then the engine goes */
+function powerOff(){
+  if(!powered || tearing) return;
+  tearing=true; powered=false; pwrPaint();
+  const t0=Date.now();
+  if(REC) printStop();
+  (function wait(){ if(REC && Date.now()-t0<600) setTimeout(wait, 20); else finishOff(); })();
+}
+function finishOff(){
+  send('panic');
+  srcClear(); if(SRC.kind==='mic'){ SRC.kind='none'; paintSrc(); }   /* the microphone never comes back by itself */
+  if(HOSTED) srcdUp({ src:'srcd-duo', cmd:'wl-kill', mod:SRCD_MOD });
+  else if(ctx){ try{ ctx.close(); }catch(_){} }
+  ctxUnwake();
+  ctx=null; node=null; ENG=''; powered=false; tearing=false; pwrPaint(); pwrSay(); stat(idleStr());
+}
+/* the rack spoke after we had decided it was not there: give it the audio back */
+function rackHeard(d){
+  RACK_SEEN=true;
+  if(!FALLBACK || HOSTED || MODE_FORCE==='solo') return;
+  if(d.cmd==='wl-ready') srcdUp({ src:'srcd-duo', cmd:'wl-kill', mod:SRCD_MOD });
+  BOOTGEN++; booting=false;
+  if(REC) printEnd();
+  if(powered){ tearing=true; finishOff(); } else { srcClear(); ctxUnwake(); }
+  FALLBACK=false; HOSTED=true; applyMode(); say('a rack answered · hosted again · power to mount');
+}
+$('pwr').addEventListener('click', ()=>{ powered ? powerOff() : powerOn(); });
+
+/* ── the patch bay: whole state plus the gate curves ── */
+function patchNow(){
+  return { fmt:'srcd-patch', v:1, mod:SRCD_MOD, name:'OSSUARY', p:state.p.slice(),
+    data:{ eqL:eqL.map(a=>[a[0],a[1]]), eqR:eqR.map(a=>[a[0],a[1]]), skull:SKIN, targets:TGT.map(a=>[a[0],a[1],a[2]|0,a[3]|0]) } };
+}
+function validPts(a){
+  if(!Array.isArray(a)) return null;
+  const out=[];
+  for(let i=0;i<a.length&&out.length<32;i++){
+    const q2=a[i];
+    if(Array.isArray(q2)&&typeof q2[0]==='number'&&typeof q2[1]==='number'&&q2[0]===q2[0]&&q2[1]===q2[1])
+      out.push([Math.max(20,Math.min(20000,q2[0])), Math.max(-18,Math.min(18,q2[1]))]);
+  }
+  out.sort((x,y)=>x[0]-y[0]);
+  return out.length?out:null;
+}
+function patchUse(pt){
+  if(!pt || pt.fmt!=='srcd-patch' || pt.mod!==SRCD_MOD || !Array.isArray(pt.p)) return 'not a '+SRCD_MOD+' patch';
+  const q0=QUIET; QUIET=true;
+  P.forEach((q,i)=>{ show(i, typeof pt.p[i]==='number' ? pt.p[i] : q.d); send('p', i, state.p[i]); });
+  if(pt.data){
+    if(typeof pt.data.skull==='number') setSkin(pt.data.skull);
+    if(Array.isArray(pt.data.targets)){ TGT=pt.data.targets.filter(a=>Array.isArray(a)&&typeof a[0]==='number'&&typeof a[1]==='number'&&a[0]===a[0]&&a[1]===a[1]).slice(0,8).map(a=>{ const pm=(a[2]|0)&4095, vm=((a[3]|0)&4095)&~pm; return [Math.max(20,Math.min(20000,a[0])),Math.max(0,Math.min(1,a[1])),pm,vm]; }); sendTg(); drawRc(); }
+    const el=validPts(pt.data.eqL);
+    if(el) eqL=el;
+    if(state.p[12]>0.5) eqR=eqL.map(a=>[a[0],a[1]]);
+    else{ const er2=validPts(pt.data.eqR); if(er2) eqR=er2; }
+    sendEq();
+  }
+  drawEq(); QUIET=q0; META[SLOT].dirty=true; paintPreset();
+  return '';
+}
+
+/* ── what the rack says ── */
+window.addEventListener('message', e=>{
+  if (window.parent !== window && !srcdAdmit(e)) return;
+  const d=e.data; if(!d || d.src!=='srcd-duo') return;
+  rackHeard(d);
+  if(d.cmd==='wl-msg'){ wmsg(d.m); return; }
+  if(d.cmd==='chrome-header'){ document.body.classList.toggle('chromed', !!d.hide); fitPages(); drawEq(); drawRc(); drawHc(); return; }
+  if(d.cmd==='tap-power'){ powered ? powerOff() : powerOn(); return; }
+  if(d.cmd==='pwr-request'){ pwrSay(); return; }
+  if(d.cmd==='midi-note') return; /* an insert has no voices */
+  if(d.cmd==='patch-get'){ srcdUp({ src:'srcd-duo', cmd:'patch', mod:SRCD_MOD, id:d.id, patch:patchNow() }); return; }
+  if(d.cmd==='patch-use'){ const why=patchUse(d.patch); srcdUp({ src:'srcd-duo', cmd:'patch-used', mod:SRCD_MOD, id:d.id, ok:!why, why }); return; }
+  /* STRATA: show these values, a null leaves one as it is, and never send them back: the host already set the worklet */
+  if(d.cmd==='state-set'){
+    { const q0=QUIET; QUIET=true; if(Array.isArray(d.p)) d.p.forEach((v, i)=>{ if(i<NP && typeof v==='number' && v===v) show(i, v); }); QUIET=q0; }
+    drawEq();
+    return;
+  }
+  if(d.cmd==='wl-dead'){ powered=false; node=null; ENG=''; if(REC) printEnd(); pwrPaint(); pwrSay(); warn('ERR — the engine stopped in the rack'); return; }
+});
+
+(function ruler(){
+  const rl=$('ruler'), l1=Math.log2(1000);
+  [[50,'50'],[100,'100'],[200,'200'],[500,'500'],[1000,'1k'],[2000,'2k'],[5000,'5k'],[10000,'10k']].forEach(a=>{
+    const sp=document.createElement('span');
+    sp.textContent=a[1]; sp.style.top=((1-Math.log2(a[0]/20)/l1)*100).toFixed(2)+'%';
+    rl.appendChild(sp);
+  });
+  ['gte','con','son','von','eon'].forEach(k=>{ LEDS[k]=$('led-'+k); });
+  LEDS.ehm=$('led-rsr');
+  for(let k=0;k<7;k++) segDraw($('sg-'+k), 0, 20, true);
+  segDraw($('sg-gr'), 0, 24, true);
+})();
+/* ── presets and compare slots: the sound only. Monitoring (level, bypass, audition, match, split) is never part of either ── */
+const MONK=['lvl','byp','gh','aud','adst','gmt','psp'];
+const PRESETS=[{"n":"INIT","d":"defaults · shroud on","p":{}},{"n":"SHROUD GLUE","d":"gentle spectral glue","p":{"son":1,"thr":0.425,"rat":0.063,"atk":0.463,"rel":0.632,"mgr":0.25,"tlt":0.5,"smt":0.375,"mix":0.75}},{"n":"RESONANCE VEIL","d":"tame ringing resonances","p":{"son":0,"von":1,"vth":0.35,"vrt":0.158,"vdp":0.5,"vsg":0.375,"vak":0.415,"vrl":0.598}},{"n":"MUD CRYPT","d":"carve 120-700 hz mud","p":{"son":0,"gte":1,"con":1,"cx1":0.367,"cx2":0.452,"cx3":0.677,"ce0":0,"ce1":1,"ce2":0,"ce3":0,"ct1":0.45,"cr1":0.182,"cat":0.5,"crl":0.653},"eq":[[100,0],[280,-2.5],[600,0],[10000,0]]},{"n":"HARSH EXORCISM","d":"soften 2-8 khz harshness","p":{"son":1,"thr":0.45,"rat":0.105,"atk":0.384,"rel":0.578,"mgr":0.375,"tlt":0.375,"smt":0.312,"mix":0.85,"von":1,"vth":0.375,"vrt":0.211,"vdp":0.444,"vsg":0.271,"vak":0.347,"vrl":0.556}},{"n":"RISE THE ROOT","d":"strip hard, resurrect a 110 hz root","p":{"son":1,"thr":0.35,"rat":0.368,"atk":0.299,"rel":0.53,"mgr":0.833,"smt":0.25,"mix":1,"eon":1,"eth":0.45,"ert":0.158,"esk":0.375,"eat":0.463,"erl":0.616,"edx":0.75,"erm":1,"etg":1,"ehm":0.8,"etw":0.259,"ehn":0.3,"ehd":0.7,"eht":0.455},"tg":[[110,1,0,0]]},{"n":"AIR EXHUMED","d":"compress, then bring the air back","p":{"son":1,"thr":0.45,"rat":0.211,"mgr":0.667,"eon":1,"eth":0.375,"ert":0.105,"erm":1,"etg":1,"ehm":0,"etw":0.556},"tg":[[12000,1,0,0]]},{"n":"FULL RITUAL","d":"every stage, gentle","p":{"gte":1,"con":1,"son":1,"von":1,"eon":1,"ce0":0,"ce1":1,"ce2":1,"ce3":1,"ct1":0.475,"cr1":0.091,"ct2":0.475,"cr2":0.091,"ct3":0.45,"cr3":0.109,"thr":0.425,"rat":0.079,"mgr":0.333,"smt":0.375,"mix":0.8,"vth":0.325,"vrt":0.132,"vdp":0.333,"eth":0.425,"ert":0.105,"erm":0.7}},{"n":"SCORCHED EARTH","d":"extreme · stress test","p":{"son":1,"thr":0.25,"rat":1.0,"atk":0.0,"rel":0.415,"mgr":1.0,"smt":0.125,"mix":1,"von":1,"vth":0.25,"vrt":0.579,"vdp":1.0}},{"n":"NIGHT WATCH","d":"mastering-grade smoothing","p":{"son":1,"thr":0.375,"rat":0.042,"atk":0.53,"rel":0.731,"mgr":0.167,"smt":0.5,"mix":0.6,"von":1,"vth":0.3,"vrt":0.079,"vdp":0.222,"vsg":0.583,"vak":0.5,"vrl":0.751}}];
+const META=[{pre:0,dirty:false},{pre:0,dirty:false}], SNAP=[null,null], PLB=[];
+let SLOT=0, QUIET=true, PLOPEN=false;
+function soundState(){ return { p:state.p.slice(), eqL:eqL.map(a=>[a[0],a[1]]), eqR:eqR.map(a=>[a[0],a[1]]), tg:TGT.map(a=>[a[0],a[1],a[2]|0,a[3]|0]) }; }
+function applySound(sn){
+  const q0=QUIET; QUIET=true;
+  P.forEach((q,i)=>{ if(MONK.indexOf(q.k)>=0) return; show(i, typeof sn.p[i]==='number'?sn.p[i]:q.d); send('p', i, state.p[i]); });
+  eqL=sn.eqL.map(a=>[a[0],a[1]]); eqR=(state.p[12]>0.5?sn.eqL:sn.eqR).map(a=>[a[0],a[1]]);
+  TGT=sn.tg.map(a=>[a[0],a[1],a[2]|0,a[3]|0]);
+  sendEq(); sendTg(); drawEq(); drawRc(); drawHc();
+  QUIET=q0;
+}
+function presetState(i){
+  const pr=PRESETS[i], p=P.map(q=>q.d);
+  Object.keys(pr.p).forEach(k=>{ p[KI[k]]=pr.p[k]; });
+  const eq=pr.eq||[[100,0],[10000,0]];
+  return { p:p, eqL:eq, eqR:eq, tg:pr.tg||[] };
+}
+function paintPreset(){
+  $('pr-title').textContent=PRESETS[META[SLOT].pre].n;
+  $('pr-sub').textContent=META[SLOT].dirty?'PRESET · EDITED':'PRESET';
+  $('v-ab').textContent=SLOT?'B':'A';
+  $('ab-txt').textContent=(SLOT?'B':'A')+' active · '+(SLOT?'A':'B')+(SNAP[1-SLOT]?' stored':' empty');
+  PLB.forEach((b,i)=>b.classList.toggle('on',i===META[SLOT].pre));
+}
+function markDirty(){ if(QUIET||META[SLOT].dirty) return; META[SLOT].dirty=true; paintPreset(); }
+function setPreset(i){
+  const n=PRESETS.length; META[SLOT].pre=((Math.round(i)%n)+n)%n; META[SLOT].dirty=false;
+  applySound(presetState(META[SLOT].pre)); paintPreset();
+}
+function abToggle(){
+  SNAP[SLOT]=soundState();
+  const o=1-SLOT;
+  if(!SNAP[o]){ SNAP[o]=soundState(); META[o]={ pre:META[SLOT].pre, dirty:META[SLOT].dirty }; }
+  SLOT=o; applySound(SNAP[SLOT]); paintPreset();
+}
+function abCopy(){ SNAP[SLOT]=soundState(); const o=1-SLOT; SNAP[o]=soundState(); META[o]={ pre:META[SLOT].pre, dirty:META[SLOT].dirty }; paintPreset(); }
+function plOpen(){ PLOPEN=true; $('plist').classList.add('open'); $('pr-name').setAttribute('aria-expanded','true'); const cur=PLB[META[SLOT].pre]; if(cur) cur.focus({preventScroll:true}); }
+function plClose(back){ PLOPEN=false; $('plist').classList.remove('open'); $('pr-name').setAttribute('aria-expanded','false'); if(back===true) $('pr-name').focus({preventScroll:true}); }
+(function presetUI(){
+  const pl=$('plist');
+  PRESETS.forEach((pr,i)=>{
+    const b=document.createElement('button'), t=document.createElement('b'), d=document.createElement('small');
+    b.className='pi'; b.id='pi-'+i; t.textContent=pr.n; d.textContent=pr.d; b.append(t,d);
+    b.addEventListener('click', ()=>{ setPreset(i); plClose(true); });
+    pl.appendChild(b); PLB.push(b);
+  });
+  $('pr-prev').addEventListener('click', ()=>setPreset(META[SLOT].pre-1));
+  $('pr-next').addEventListener('click', ()=>setPreset(META[SLOT].pre+1));
+  $('pr-name').addEventListener('click', ()=>{ if(PLOPEN) plClose(); else plOpen(); });
+  pl.addEventListener('pointerdown', e=>{ if(e.target===pl) plClose(); });
+  $('pr-name').setAttribute('aria-haspopup','true'); $('pr-name').setAttribute('aria-expanded','false');
+  pl.addEventListener('keydown', e=>{
+    const k=e.key; if(k!=='ArrowDown'&&k!=='ArrowUp'&&k!=='ArrowLeft'&&k!=='ArrowRight'&&k!=='Home'&&k!=='End') return;
+    e.preventDefault(); const n=PLB.length, c0=PLB.indexOf(document.activeElement); let j=c0<0?0:c0;
+    if(k==='ArrowDown'||k==='ArrowRight') j=Math.min(n-1,j+1); else if(k==='ArrowUp'||k==='ArrowLeft') j=Math.max(0,j-1); else if(k==='Home') j=0; else j=n-1;
+    PLB[j].focus();
+  });
+  $('bt-ab').addEventListener('click', abToggle);
+  $('ab-copy').addEventListener('click', abCopy);
+})();
+
+/* ── tabs: a fixed portrait face, stages slide in sideways from the bottom dock ── */
+let TAB=2;
+function setTab(n){
+  n=Math.max(0,Math.min(7,Math.round(n))); TAB=n;
+  $('track').style.transform='translateX('+(-100*n)+'%)';
+  $('ind').style.transform='translateX('+(100*n)+'%)';
+  for(let i=0;i<8;i++){
+    const on=i===n, p=$('page-'+i), t=$('tab-'+i);
+    t.classList.toggle('on',on); t.setAttribute('aria-selected',on?'true':'false'); t.tabIndex=on?0:-1;
+    p.inert=!on; p.setAttribute('aria-hidden',on?'false':'true');
+  }
+  if(n===0) drawEq();
+  if(n===4) drawRc();
+  if(n===5) drawHc();
+}
+/* fit: every page shows everything, never a hidden scroll. Compact first, scale as the last resort. */
+function fitPages(){
+  for(let i=0;i<8;i++){
+    const p=$('page-'+i);
+    p.style.zoom=''; p.classList.remove('c1','c2');
+    const over=()=>p.scrollHeight>p.clientHeight+1;
+    if(over()){
+      p.classList.add('c1');
+      if(over()){
+        p.classList.add('c2');
+        if(over()){ const z=Math.max(0.55,(p.clientHeight/p.scrollHeight)*0.97); p.style.zoom=z.toFixed(3); }
+      }
+    }
+  }
+}
+for(let i=0;i<8;i++) $('tab-'+i).addEventListener('click', ()=>setTab(i));
+$('dock').addEventListener('keydown', e=>{
+  const k=e.key; let n=-1;
+  if(k==='ArrowRight') n=Math.min(7,TAB+1); else if(k==='ArrowLeft') n=Math.max(0,TAB-1); else if(k==='Home') n=0; else if(k==='End') n=7; else return;
+  e.preventDefault(); setTab(n); $('tab-'+n).focus();
+});
+(function swipe(){
+  const pg=$('pager'); let sx=0, sy=0, sid=-1;
+  pg.addEventListener('pointerdown', e=>{
+    if(PLOPEN || (e.target && e.target.closest && e.target.closest('.kn,input,canvas,button,select'))){ sid=-1; return; }
+    sx=e.clientX; sy=e.clientY; sid=e.pointerId;
+  });
+  pg.addEventListener('pointerup', e=>{
+    if(sid!==e.pointerId) return; sid=-1;
+    const dx=e.clientX-sx, dy=e.clientY-sy;
+    if(Math.abs(dx)>44 && Math.abs(dx)>Math.abs(dy)*1.4) setTab(TAB+(dx<0?1:-1));
+  });
+  pg.addEventListener('pointercancel', ()=>{ sid=-1; });
+})();
+(function skullPicker(){
+  const box=$('skp');
+  SKN.forEach((nm,i)=>{
+    const b=document.createElement('button'), th=document.createElement('span'), lb=document.createElement('small');
+    b.className='skp'; b.id='sp-'+i; th.className='skth'; lb.textContent=nm;
+    th.appendChild(i===0?skullDom('big',1003):$('tpl-sk'+(i-1)).content.cloneNode(true)); b.append(th, lb);
+    b.addEventListener('click', ()=>setSkin(i));
+    box.appendChild(b); SKP.push(b);
+  });
+})();
+window.addEventListener('resize', ()=>{ fitDisp(); fitPages(); drawEq(); drawRc(); drawHc(); });
+buildSimple('pg-loss', ['psp']);
+hint('pg-loss', 'prepared split: left = dry, right = what the settings would remove · audition PREPARED to use it');
+$('bt-print').addEventListener('click', printToggle);
+for(let i=0;i<8;i++){ $('tab-'+i).setAttribute('aria-controls','page-'+i); const pp=$('page-'+i); pp.setAttribute('role','tabpanel'); pp.setAttribute('aria-labelledby','tab-'+i); }
+setSkin(0); setTab(2);
+/* paint the defaults, then wait for power */
+P.forEach((q,i)=>show(i, q.d));
+drawEq();
+buildRows();
+applyMode();
+fitPages(); drawEq(); drawRc(); drawHc();
+QUIET=false; paintPreset();
+</script>
+</body>
+</html>
