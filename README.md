@@ -66,13 +66,13 @@ Tested in headless Chrome 153 on a cloud server with no sound card. Results were
 - 10.2 layouts are not supported.
 - Your groups are not kept when you reload the page. Export a patch to keep them.
 
-Support
+## Support
 
-OSSUARY is free for individuals and small companies (see License). If it is useful to you and you want to chip in, you can: https://PayPal.me/LastHitLeft/5
+OSSUARY is free for small companies under the limits in the license (see License). If it is useful to you and you want to chip in, you can: https://PayPal.me/LastHitLeft/5
 
-License
+## License
 
-OSSUARY is source-available under the PolyForm Small Business License 1.0.0. It is free for individuals and for companies with fewer than 100 people and under about $1 million a year in revenue. Larger companies need a paid license: contact MavArtCreator@gmail.com.
+OSSUARY is source-available under the PolyForm Small Business License 1.0.0. It is free for companies with fewer than 100 people and under 1,000,000 USD (2019 dollars, adjusted for inflation) in yearly revenue. Larger companies need a separate license from me: contact MavArtCreator@gmail.com.
 
 Audio you make with OSSUARY is yours.
 
