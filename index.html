@@ -30,6 +30,7 @@
      r13 · LINK, in the engine: inputs 1..8 carry other channels (the key); per bin, a pair's sides can be linked by any amount and groups linked across by any amount (every linked detector hears the loudest of them); crypt, shroud, velvet and exhume detectors hear the offset; 'ph' aligns an engine's hops with the others. No link message = the engine exactly as before.
      r13b · backup mode says so: when live falls back to the main-thread engine, the status line and the power message tell you linking is off live and sound may stutter; RENDER is unaffected.
      r14 · backup mode links live and copes with slow machines: with more than one engine (or a link) one ScriptProcessor runs every engine in the same callback, so linked groups hear each other as on the worklet; buffers that go missing double the buffer (2048, 4096, 8192), work too heavy for the device steps full mix back to the edited group, each with a message. Older browsers: a file is read with a FileReader where Blob.arrayBuffer is missing, a few CSS fallbacks. Nothing in the module span changed.
+     r16 · takes open in a side drawer from the right (tap TAKES, the shade, CLOSE or Esc to shut it, or swipe it right), with CLEAR inside it; the long note under PRINT and RENDER folds behind ?. Page layout only: nothing in the module span or the content security policy changed, and RENDER is byte for byte as in r15.
      r15 · linking is exact with different gate curves: a link compared each engine's own level after its gate curve with the other channels' levels before theirs; now 'lk' may carry each key channel's curve (q), and the stages after the gate in ORDER (and exhume) hear every channel after its own curve. The face sends q only when the curves of a link differ, so unlinked, equal-curve and gate-off setups are bit for bit as in r14. -->
 <html lang="en">
 <head>
@@ -149,8 +150,7 @@ canvas.seg{width:100%;height:12px;display:block}
 .pi small{font-size:8px;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
 .ab{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .prt{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-#takelist{display:grid;gap:4px;max-height:132px;overflow:auto;margin:4px 0}
-#takelist button{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#tkscrim{position:fixed;top:0;right:0;bottom:0;left:0;z-index:70;background:rgba(5,5,8,.6)} #tkscrim[hidden]{display:none} .tkd{position:fixed;top:0;right:0;bottom:0;width:88%;max-width:380px;z-index:71;display:flex;flex-direction:column;gap:6px;padding:10px;background:#0b0b10;border-left:1px solid var(--line);box-shadow:-10px 0 28px rgba(0,0,0,.6);transform:translateX(104%);visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s linear .28s} .tkd.open{transform:none;visibility:visible;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s} .tkh{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--line)} .tkt{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--hi)} .tkt b{font-weight:400;color:var(--dim)} #takelist{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:6px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:2px 0} #takelist button{text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;overflow-wrap:anywhere;line-height:1.3;min-height:44px;max-width:100%} #takelist>*{flex:none} #takelist .note{padding:8px 2px} .tkf{display:flex;flex-direction:column;align-items:stretch;gap:6px;padding-top:8px;border-top:1px solid var(--line);padding-bottom:6px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))} .tkf .tog{min-height:44px} .tkf .note{font-size:10px} #bt-help{min-width:34px;padding-left:0;padding-right:0;text-align:center} #printnote[hidden]{display:none} @media (prefers-reduced-motion:reduce){.tkd,.tkd.open{transition:none}}
 .tkrow{display:flex;gap:4px;min-width:0}.tkrow>button:first-child{flex:1;min-width:0}.tkrow>button:last-child{flex:none}
 #grpbox,#monbox{display:grid;gap:6px;margin:4px 0}#grpbox[hidden],#monbox[hidden]{display:none}#grpbox .prt,#monbox .prt{gap:6px}.tog.gx{opacity:.45}
 #printtxt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--dim);text-transform:uppercase}
@@ -259,8 +259,8 @@ body.dropping .chassis::after{content:'drop an audio file';position:fixed;top:6p
     <div class="lf"><span id="ordtxt"></span></div>
     <div class="note">bars are power against the input. recovered + permanent bars will not sum to removed: squared gains leave a cross term, and that energy is not lost. the waveforms do add.</div>
     <div class="pg" id="pg-loss"></div>
-    <div class="prt"><button class="tog" id="bt-print">PRINT</button><button class="tog" id="bt-rend" disabled>RENDER</button><button class="tog" id="bt-takes" disabled>TAKES</button><button class="tog" id="bt-tkclear" hidden>CLEAR</button><button class="tog" id="bt-grp" disabled>GROUPS</button><button class="tog" id="bt-mon">MONITOR</button><span id="printtxt">idle</span></div><div id="takelist" hidden></div><div id="grpbox" hidden><div class="prt" role="group" aria-label="channel group the dials edit"><button class="tog" id="gk-F" type="button">FRONT</button><button class="tog" id="gk-C" type="button">CENTER</button><button class="tog" id="gk-LFE" type="button">LFE</button><button class="tog" id="gk-S" type="button">SURR</button><button class="tog" id="gk-B" type="button">BACK</button></div><div class="prt"><button class="tog" id="gs-own" type="button">SHARED</button><button class="tog" id="gs-link" type="button">SIDES LINKED</button><button class="tog" id="gs-in" type="button">IN ALL LINK</button><button class="tog" id="gs-all" type="button">ALL LINK OFF</button></div><div class="note" id="grptxt"></div></div><div id="monbox" hidden><div class="prt"><button class="tog" id="mn-mix" type="button">FULL MIX</button><button class="tog" id="mn-solo" type="button">GROUP</button><button class="tog" id="mn-st" type="button">STEREO</button><button class="tog" id="mn-mono" type="button">MONO</button></div><div class="prt" role="group" aria-label="playback device"><button class="tog" id="md-0" type="button">DIRECT</button><button class="tog" id="md-1" type="button">PHONE</button><button class="tog" id="md-2" type="button">SMALL</button><button class="tog" id="md-3" type="button">LARGE</button><button class="tog" id="md-4" type="button">CAR</button><button class="tog" id="md-5" type="button">STUDIO</button></div><div class="note" id="montxt"></div></div>
-    <div class="note" id="printnote">print records the audition stream as it leaves the engine, before level and the output ceiling, as a 32-bit float wav · bypass, match and the prepared split are part of it: print REMOVED, RECOVERED and PERMANENT with bypass off and they add as waveforms (recovered + permanent = removed) · render: the loaded file, offline, lined up with the source, metadata kept · mono to 7.1 · groups: a channel group can own its settings, the dials edit the group picked, pair sides linked, split or in between, an all link turns groups down together · monitor: full mix or one group, stereo or mono, device emulations, never printed or rendered · print: the group the dials edit · takes: shared with KAIJU-BLUE on the same address</div></article>
+    <div class="prt"><button class="tog" id="bt-print">PRINT</button><button class="tog" id="bt-rend" disabled>RENDER</button><button class="tog" id="bt-takes" disabled aria-haspopup="dialog" aria-expanded="false">TAKES</button><button class="tog" id="bt-grp" disabled>GROUPS</button><button class="tog" id="bt-mon">MONITOR</button><button class="tog" id="bt-help" type="button" aria-expanded="false" aria-controls="printnote" title="what these buttons do">?</button><span id="printtxt">idle</span></div><div id="grpbox" hidden><div class="prt" role="group" aria-label="channel group the dials edit"><button class="tog" id="gk-F" type="button">FRONT</button><button class="tog" id="gk-C" type="button">CENTER</button><button class="tog" id="gk-LFE" type="button">LFE</button><button class="tog" id="gk-S" type="button">SURR</button><button class="tog" id="gk-B" type="button">BACK</button></div><div class="prt"><button class="tog" id="gs-own" type="button">SHARED</button><button class="tog" id="gs-link" type="button">SIDES LINKED</button><button class="tog" id="gs-in" type="button">IN ALL LINK</button><button class="tog" id="gs-all" type="button">ALL LINK OFF</button></div><div class="note" id="grptxt"></div></div><div id="monbox" hidden><div class="prt"><button class="tog" id="mn-mix" type="button">FULL MIX</button><button class="tog" id="mn-solo" type="button">GROUP</button><button class="tog" id="mn-st" type="button">STEREO</button><button class="tog" id="mn-mono" type="button">MONO</button></div><div class="prt" role="group" aria-label="playback device"><button class="tog" id="md-0" type="button">DIRECT</button><button class="tog" id="md-1" type="button">PHONE</button><button class="tog" id="md-2" type="button">SMALL</button><button class="tog" id="md-3" type="button">LARGE</button><button class="tog" id="md-4" type="button">CAR</button><button class="tog" id="md-5" type="button">STUDIO</button></div><div class="note" id="montxt"></div></div>
+    <div class="note" id="printnote" hidden>print records the audition stream as it leaves the engine, before level and the output ceiling, as a 32-bit float wav · bypass, match and the prepared split are part of it: print REMOVED, RECOVERED and PERMANENT with bypass off and they add as waveforms (recovered + permanent = removed) · render: the loaded file, offline, lined up with the source, metadata kept · mono to 7.1 · groups: a channel group can own its settings, the dials edit the group picked, pair sides linked, split or in between, an all link turns groups down together · monitor: full mix or one group, stereo or mono, device emulations, never printed or rendered · print: the group the dials edit · takes: shared with KAIJU-BLUE on the same address</div></article>
   <article class="page" id="page-7"><h2>Sys<em>skull · signals · keys</em></h2>
     <div class="sub">compare slots · <b id="ab-txt">A active · B empty</b></div><div class="ab"><button class="tog" id="ab-copy">copy active to the other slot</button></div><div class="sub">patch file · <b id="pt-txt">settings and groups, no audio</b></div><div class="ab"><button class="tog" id="pt-exp">EXPORT PATCH</button><button class="tog" id="pt-imp">IMPORT PATCH</button><input type="file" id="pt-in" accept=".json,application/json" hidden aria-hidden="true" tabindex="-1"></div>
     <div class="sub">skull · <b id="skull-name">Horned</b></div><div class="skg" id="skp"></div>
@@ -277,6 +277,12 @@ body.dropping .chassis::after{content:'drop an audio file';position:fixed;top:6p
 </div></section>
 <nav class="dock" id="dock" role="tablist"><button class="tab" id="tab-0" role="tab" aria-selected="false"><i class="led" id="led-gte"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16C7 16 7 7 12 7S17 16 21 16"/></svg><span>Gate</span></button><button class="tab" id="tab-1" role="tab" aria-selected="false"><i class="led" id="led-con"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19v-6M10 19V6M15 19v-9M20 19V4"/></svg><span>Crypt</span></button><button class="tab" id="tab-2" role="tab" aria-selected="false"><i class="led" id="led-son"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19c0-9 4-13 9-13s9 4 9 13z"/></svg><span>Shroud</span></button><button class="tab" id="tab-3" role="tab" aria-selected="false"><i class="led" id="led-von"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h6l2-13 2 9 2-9 2 13h6"/></svg><span>Velvet</span></button><button class="tab" id="tab-4" role="tab" aria-selected="false"><i class="led" id="led-eon"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v11M7 10l5-5 5 5M5 20h14"/></svg><span>Exhume</span></button><button class="tab" id="tab-5" role="tab" aria-selected="false"><i class="led" id="led-rsr"></i><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="8" rx="3.5" ry="4.5"/><path d="M12 12.5V21M7.5 16.5h9"/></svg><span>Resurrect</span></button><button class="tab" id="tab-6" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h7"/></svg><span>Loss</span></button><button class="tab" id="tab-7" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg><span>Sys</span></button><i id="ind"></i></nav>
 </div>
+<div id="tkscrim" hidden></div>
+<aside id="tkdrawer" class="tkd" role="dialog" aria-label="takes" aria-hidden="true">
+<div class="tkh"><span class="tkt">TAKES<b id="tkcount"></b></span><button class="tog" id="tkclose" type="button" aria-label="close the takes list">CLOSE</button></div>
+<div id="takelist"></div>
+<div class="tkf"><button class="tog" id="bt-tkclear" type="button">CLEAR</button><span class="note">clear deletes every take, including the ones KAIJU-BLUE made · tap twice</span></div>
+</aside>
 <script>
 "use strict";
 /* ═══════════ SRC-D SHΛRΞD HΞΛDΞR · as the suite's faces carry it ═══════════ */
@@ -2440,14 +2446,14 @@ function tkDraw(){
   const box=$('takelist'); if(!box||!TK_OPEN) return;
   TS.list().then(a=>{
     if(!TK_OPEN) return;
-    box.textContent='';
+    box.textContent=''; const ct=$('tkcount'); if(ct) ct.textContent=a.length?' · '+a.length:'';
     if(!a.length){ const d=document.createElement('div'); d.className='note'; d.textContent='no takes · open KAIJU-BLUE from the same address'; box.appendChild(d); return; }
     a.forEach(r=>{
       const b=document.createElement('button'); b.className='tog'; b.type='button';
       b.textContent=(r.from==='kaiju'?'kaiju':'ossuary')+' · '+String(r.name||'take').replace(/\.wav$/i,'')+' · '+(+r.sec||0).toFixed(1)+' s · '+(TK_CH[r.ch]||r.ch+' ch')+' · '+((+r.sr||0)/1000)+'k';
       if(TAKE_SRC&&TAKE_SRC.id===r.id&&SRC.file===TAKE_SRC.file) b.classList.add('on');
-      b.addEventListener('click',()=>tkLoad(r.id));
-      if(r.from==='ossuary'&&r.patch){ const row=document.createElement('div'), rc=document.createElement('button'); row.className='tkrow'; rc.className='tog'; rc.type='button'; rc.textContent='RECALL'; rc.title='bring back the settings this take was made with, and the take it was made from'; rc.addEventListener('click',()=>tkRecall(r)); row.append(b,rc); box.appendChild(row); }
+      b.addEventListener('click',()=>{ tkLoad(r.id); tkSet(false); });
+      if(r.from==='ossuary'&&r.patch){ const row=document.createElement('div'), rc=document.createElement('button'); row.className='tkrow'; rc.className='tog'; rc.type='button'; rc.textContent='RECALL'; rc.title='bring back the settings this take was made with, and the take it was made from'; rc.addEventListener('click',()=>{ tkRecall(r); tkSet(false); }); row.append(b,rc); box.appendChild(row); }
       else box.appendChild(b);
     });
   }).catch(err=>{ box.textContent=''; const d=document.createElement('div'); d.className='note'; d.textContent='takes unavailable here: '+String(err&&err.message||err); box.appendChild(d); });
@@ -2471,9 +2477,26 @@ function tkLoad(id){
     TAKE_SRC={ id:r.id, k:r.k||'', file:f }; fileLoad(f); tkDraw();
   }).catch(err=>warn('take store: '+String(err&&err.message||err)));
 }
-$('bt-takes').addEventListener('click',()=>{
-  TK_OPEN=!TK_OPEN; $('bt-takes').classList.toggle('on',TK_OPEN); $('takelist').hidden=!TK_OPEN; $('bt-tkclear').hidden=!TK_OPEN; if(TK_OPEN) tkDraw(); else tkDisarm();
-});
+/* the takes library is a drawer that slides in from the right: tap TAKES, the shade, CLOSE or Esc to shut it, or swipe it back to the right */
+function tkSet(on){
+  on=!!on; if(on===TK_OPEN) return;
+  const d=$('tkdrawer'), tb=$('bt-takes'); TK_OPEN=on;
+  tb.classList.toggle('on',on); tb.setAttribute('aria-expanded',on?'true':'false');
+  d.classList.toggle('open',on); d.setAttribute('aria-hidden',on?'false':'true'); $('tkscrim').hidden=!on;
+  if(on){ tkDraw(); try{ $('tkclose').focus(); }catch(_){} }
+  else{ tkDisarm(); try{ if(d.contains(document.activeElement)) tb.focus(); }catch(_){} }
+}
+$('bt-takes').addEventListener('click',()=>tkSet(!TK_OPEN));
+$('tkclose').addEventListener('click',()=>tkSet(false));
+$('tkscrim').addEventListener('click',()=>tkSet(false));
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&TK_OPEN){ e.preventDefault(); tkSet(false); } });
+(function(){ let x0=0,y0=0,t0=0,on=false; const d=$('tkdrawer');
+  d.addEventListener('touchstart',e=>{ const t=e.touches[0]; if(!t||e.touches.length>1){ on=false; return; } x0=t.clientX; y0=t.clientY; t0=Date.now(); on=true; },{passive:true});
+  d.addEventListener('touchend',e=>{ if(!on) return; on=false; const t=e.changedTouches[0]; if(!t) return; const dx=t.clientX-x0, dy=t.clientY-y0; if(dx>56&&Math.abs(dy)<Math.abs(dx)*0.6&&Date.now()-t0<700) tkSet(false); },{passive:true});
+  d.addEventListener('touchcancel',()=>{ on=false; },{passive:true});
+})();
+/* the long note under PRINT, RENDER, TAKES, GROUPS and MONITOR stays folded behind ? */
+$('bt-help').addEventListener('click',()=>{ const n=$('printnote'), open=n.hidden; n.hidden=!open; $('bt-help').classList.toggle('on',open); $('bt-help').setAttribute('aria-expanded',open?'true':'false'); });
 try{ TS.on(()=>{ if(TK_OPEN) tkDraw(); }); }catch(_){}
 /* after a render of a take that came from the store: the processed version goes back, with the patch that made it */
 async function tkSendBack(f,r){
