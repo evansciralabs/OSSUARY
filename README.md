@@ -6,7 +6,7 @@ OSSUARY is the companion to KAIJU-BLUE. Takes you record there appear in OSSUARY
 
 **Open it:** https://evansciralabs.github.io/OSSUARY/ (or download `index.html` here and open it from your computer)
 
-**User guide:** coming soon
+**User guide:** USER-GUIDE.md
 
 ## What it does
 
